@@ -4,7 +4,7 @@ export async function onRequest({ request, env }) {
   let origin;
   try {
     origin = new URL(env.API_ORIGIN);
-    if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || !env.PROXY_SHARED_SECRET) throw new Error();
+    if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || typeof env.PROXY_SHARED_SECRET !== 'string' || env.PROXY_SHARED_SECRET.length < 32) throw new Error();
   } catch {
     return new Response('API is unavailable.', { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }

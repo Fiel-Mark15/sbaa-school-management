@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { onRequest } from '../functions/api/[[path]].js';
 
-const env = { API_ORIGIN: 'https://api.example.org', PROXY_SHARED_SECRET: 'test-only-secret' };
+const env = { API_ORIGIN: 'https://api.example.org', PROXY_SHARED_SECRET: 'test-only-secret-that-is-not-for-deployment' };
 const realFetch = globalThis.fetch;
 try {
   let forwarded;
