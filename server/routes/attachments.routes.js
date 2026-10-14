@@ -79,7 +79,7 @@ router.put('/:id/image',authorize('ADMIN'),uploadLimit,uploadMiddleware,async(re
     await connection.beginTransaction();const [[old]]=await connection.execute("SELECT storage_key,status FROM schedule_attachments WHERE id=? FOR UPDATE",[attachmentId]);if(!old||old.status==='ARCHIVED'){await connection.rollback();await unlink(path.join(storageDir,`${newKey}.webp`));return fail(res,'Attachment not found.',404);}oldKey=old.storage_key;
     await connection.execute('UPDATE schedule_attachments SET storage_key=?,width=?,height=?,version=version+1,status=\'DRAFT\' WHERE id=?',[newKey,image.width,image.height,attachmentId]);
     await connection.execute("INSERT INTO audit_logs(user_id,action,entity_type,entity_id) VALUES (?,'SCHEDULE_IMAGE_REPLACED','schedule_attachments',?)",[req.user.sub,attachmentId]);await connection.commit();
-    try{await unlink(path.join(storageDir,`${oldKey}.webp`));}catch(error){console.error('Old attachment cleanup failed:',error.code||error.message);}
+    try{await unlink(path.join(storageDir,`${oldKey}.webp`));}catch(error){console.error('Old attachment cleanup failed:',error.code||'FILE_ERROR');}
     return ok(res,null,'Replacement saved as a draft. Publish when reviewed.');
   }catch(error){try{await connection.rollback();}catch{}if(newKey)try{await unlink(path.join(storageDir,`${newKey}.webp`));}catch{}if(error.message?.startsWith('Invalid image')||error.message?.startsWith('Choose a'))return fail(res,error.message,422);next(error);}finally{connection.release();}
 });
