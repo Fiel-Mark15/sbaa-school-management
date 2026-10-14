@@ -1,0 +1,1 @@
+<template><div class="school-mark"><img src="/assets/sbaa-logo.png" alt="School of Business Administration and Accountancy logo" /><span><strong>School Portal</strong><small>SBAA · CHCC</small></span></div></template>

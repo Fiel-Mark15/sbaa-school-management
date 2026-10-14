@@ -1,0 +1,42 @@
+{
+  "name": "sbaa-portal-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch app.js",
+    "start": "node app.js",
+    "reminders:worker": "node services/reminder-worker.js",
+    "backup:private": "node scripts/backup-private.js",
+    "db:migrate": "node database/migrate.js",
+    "db:seed": "node database/seed.js",
+    "cleanup:dev": "node scripts/cleanup-dev-content.js",
+    "test:integration": "node tests/integration.test.js",
+    "test:repair": "node tests/repair.test.js",
+    "test:extended": "node tests/extended.test.js",
+    "test:admin-profile": "node tests/admin-profile.test.js",
+    "test:new-workflows": "node tests/new-workflows.test.js",
+    "test:refinement": "node tests/refinement.test.js",
+    "test:master-prompt": "node tests/master-prompt.test.js",
+    "test:acquisitions": "node tests/acquisitions.test.js",
+    "test:archive": "node tests/archive.test.js",
+    "test:manual-enrollment": "node tests/manual-enrollment.test.js",
+    "test:class-reminders": "node tests/class-reminders.test.js",
+    "test:session-cookie": "node tests/session-cookie.unit.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "multer": "^2.4.0",
+    "mysql2": "^3.12.0",
+    "nodemailer": "^10.0.13",
+    "sharp": "^0.35.5"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "sbaa-school-portal",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "concurrently --kill-others --kill-signal SIGTERM \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "db:seed": "npm run db:seed --prefix server",
+    "db:migrate": "npm run db:migrate --prefix server",
+    "cleanup:dev": "npm run cleanup:dev --prefix server",
+    "build": "npm run build --prefix client"
+  },
+  "devDependencies": { "concurrently": "^9.1.2" }
+}

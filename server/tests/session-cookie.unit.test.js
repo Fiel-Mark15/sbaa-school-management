@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+process.env.CSRF_SECRET = 'unit-test-only-not-a-deployment-secret-123456';
+const { setSessionCookie, clearSessionCookie, readSessionCookie, csrfTokenForSession, validCsrfToken } = await import('../utils/session-cookie.js');
+
+const token = 'A'.repeat(43);
+const response = { values: {}, set(key, value) { this.values[key] = value; } };
+setSessionCookie(response, token);
+assert.match(response.values['Set-Cookie'], /^sbaa_session=/);
+assert.match(response.values['Set-Cookie'], /HttpOnly/);
+assert.match(response.values['Set-Cookie'], /SameSite=Lax/);
+assert.match(response.values['Set-Cookie'], /Path=\/api/);
+assert.equal(readSessionCookie({ headers: { cookie: `other=x; sbaa_session=${token}` } }), token);
+assert.equal(readSessionCookie({ headers: { cookie: 'sbaa_session=invalid' } }), null);
+const digest = 'B'.repeat(64);
+const csrf = csrfTokenForSession(digest);
+assert.equal(validCsrfToken(digest, csrf), true);
+assert.equal(validCsrfToken('C'.repeat(64), csrf), false);
+clearSessionCookie(response);
+assert.match(response.values['Set-Cookie'], /Max-Age=0/);
+console.log('Cookie-session and CSRF checks passed.');

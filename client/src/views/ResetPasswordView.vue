@@ -1,0 +1,14 @@
+<script setup>
+import { onMounted, ref } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
+import api from '../services/api';
+import SchoolMark from '../components/SchoolMark.vue';
+import PasswordRequirements from '../components/PasswordRequirements.vue';
+import { passwordValid } from '../../../shared/password-policy.js';
+import { useAuthStore } from '../stores/auth';
+const auth=useAuthStore();
+const route=useRoute(),token=typeof route.query.token==='string'?route.query.token:'',password=ref(''),confirm=ref(''),loading=ref(true),submitting=ref(false),error=ref(''),success=ref(''),maskedEmail=ref(''),valid=ref(false);
+onMounted(async()=>{if(!token){error.value='This reset link is missing or invalid.';loading.value=false;return;}try{const response=await api.get('/auth/reset-password/validate',{params:{token}});maskedEmail.value=response.data.data.maskedEmail;valid.value=true;}catch(e){error.value=e.response?.data?.message||'This reset link is invalid or has expired.';}finally{loading.value=false;}});
+async function submit(){if(submitting.value||!valid.value)return;error.value='';if(!passwordValid(password.value)||password.value!==confirm.value){error.value='Complete the password checklist before continuing.';return;}submitting.value=true;try{success.value=(await api.post('/auth/reset-password',{token,password:password.value})).data.message;auth.clearLocal();password.value='';confirm.value='';valid.value=false;window.history.replaceState(null,'','/reset-password');}catch(e){error.value=e.response?.data?.message||'Password reset failed.';if([400,403].includes(e.response?.status))valid.value=false;}finally{submitting.value=false;}}
+</script>
+<template><div class="login-page"><section class="login-brand"><div class="logo-watermark" aria-hidden="true"></div><SchoolMark/><div class="brand-copy"><p class="eyebrow">ACCOUNT RECOVERY</p><h1>Choose a new password.</h1><p>Your previous sessions will be signed out.</p></div></section><section class="login-form-wrap"><form class="login-form" @submit.prevent="submit"><p class="eyebrow">PASSWORD RESET</p><h1>Set a new password</h1><p v-if="loading" class="subtle" role="status">Checking your reset link…</p><p v-if="error" class="form-error" role="alert">{{error}}</p><p v-if="success" class="success-message" role="status">{{success}} <RouterLink to="/login">Sign in</RouterLink></p><template v-else-if="valid"><p class="subtle">For {{maskedEmail}}. This link expires in 30 minutes and works once.</p><PasswordRequirements v-model="password" v-model:confirm="confirm" id-prefix="reset" confirm-label="Confirm new password"/><button class="primary" :disabled="submitting">{{submitting?'Updating…':'Update password'}}</button></template><p v-else-if="!loading" class="account-link"><RouterLink to="/forgot-password">Request a new link</RouterLink></p><p class="account-link"><RouterLink to="/login">Back to sign in</RouterLink></p></form></section></div></template>

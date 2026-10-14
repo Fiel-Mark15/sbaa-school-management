@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS acquisitions (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  requester_id BIGINT UNSIGNED NOT NULL,
+  reviewer_id BIGINT UNSIGNED NULL,
+  title VARCHAR(180) NOT NULL,
+  category ENUM('SUPPLIES','EQUIPMENT','BOOKS','LEARNING_RESOURCES') NOT NULL,
+  description TEXT NOT NULL,
+  quantity DECIMAL(10,2) NOT NULL,
+  unit VARCHAR(40) NOT NULL,
+  purpose TEXT NOT NULL,
+  needed_by DATE NULL,
+  estimated_unit_cost DECIMAL(12,2) NULL,
+  status ENUM('DRAFT','SUBMITTED','APPROVED','REJECTED','ORDERED','RECEIVED','CANCELLED') NOT NULL DEFAULT 'DRAFT',
+  attachment_key CHAR(64) NULL,
+  attachment_name VARCHAR(180) NULL,
+  attachment_mime VARCHAR(40) NULL,
+  archived_at DATETIME NULL,
+  archived_by BIGINT UNSIGNED NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (requester_id) REFERENCES users(id),
+  FOREIGN KEY (reviewer_id) REFERENCES users(id),
+  FOREIGN KEY (archived_by) REFERENCES users(id),
+  INDEX idx_acquisitions_status_date (status,created_at),
+  INDEX idx_acquisitions_requester (requester_id,created_at),
+  CONSTRAINT chk_acquisition_quantity CHECK (quantity > 0),
+  CONSTRAINT chk_acquisition_cost CHECK (estimated_unit_cost IS NULL OR estimated_unit_cost >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS acquisition_history (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  acquisition_id BIGINT UNSIGNED NOT NULL,
+  actor_id BIGINT UNSIGNED NOT NULL,
+  from_status VARCHAR(20) NULL,
+  to_status VARCHAR(20) NOT NULL,
+  comment VARCHAR(1000) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (acquisition_id) REFERENCES acquisitions(id),
+  FOREIGN KEY (actor_id) REFERENCES users(id),
+  INDEX idx_acquisition_history (acquisition_id,created_at,id)
+);

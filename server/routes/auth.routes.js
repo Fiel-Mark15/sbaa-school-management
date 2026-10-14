@@ -1,0 +1,21 @@
+import { Router } from 'express';
+import { csrf, forgotPassword, login, logout, me, register, resetPassword, validateResetToken, validateEmailChange, confirmEmailChange, validateCurrentEmail, confirmCurrentEmail } from '../controllers/auth.controller.js';
+import { authenticate } from '../middleware/auth.js';
+import rateLimit from 'express-rate-limit';
+import { env } from '../config/env.js';
+const router = Router();
+const limit=(max,windowMs)=>rateLimit({windowMs,max,standardHeaders:'draft-6',legacyHeaders:false,
+  handler:(req,res)=>{const retryAfter=Math.max(1,Math.ceil((req.rateLimit.resetTime-Date.now())/1000));res.set('Retry-After',String(retryAfter)).status(429).json({success:false,message:`Too many requests. Try again in ${Math.ceil(retryAfter/60)} minute${retryAfter>60?'s':''}.`,retryAfter});}});
+router.post('/login', limit(env.limits.login,15*60*1000), login);
+router.post('/register', limit(env.limits.register,15*60*1000), register);
+router.post('/forgot-password',limit(env.limits.forgot,15*60*1000),forgotPassword);
+router.get('/reset-password/validate',limit(env.limits.validate,15*60*1000),validateResetToken);
+router.post('/reset-password',limit(env.limits.reset,15*60*1000),resetPassword);
+router.get('/email-change/validate',limit(env.limits.validate,15*60*1000),validateEmailChange);
+router.post('/email-change/confirm',limit(env.limits.reset,15*60*1000),confirmEmailChange);
+router.get('/verify-current-email/validate',limit(env.limits.validate,15*60*1000),validateCurrentEmail);
+router.post('/verify-current-email/confirm',limit(env.limits.reset,15*60*1000),confirmCurrentEmail);
+router.get('/me', authenticate, me);
+router.get('/csrf', authenticate, csrf);
+router.post('/logout', authenticate, logout);
+export default router;

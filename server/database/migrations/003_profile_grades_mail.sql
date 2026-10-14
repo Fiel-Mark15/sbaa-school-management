@@ -1,0 +1,60 @@
+-- Additive migration: personal media, verified email changes, mail diagnostics, and grades.
+CREATE TABLE IF NOT EXISTS profile_photos (
+  user_id BIGINT UNSIGNED PRIMARY KEY,
+  storage_key CHAR(64) NOT NULL UNIQUE,
+  width SMALLINT UNSIGNED NOT NULL,
+  height SMALLINT UNSIGNED NOT NULL,
+  version INT UNSIGNED NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS email_change_tokens (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  pending_email VARCHAR(190) NOT NULL,
+  token_digest CHAR(64) NOT NULL UNIQUE,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  INDEX idx_email_change_user (user_id,used_at,expires_at)
+);
+
+CREATE TABLE IF NOT EXISTS mail_delivery_events (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NULL,
+  purpose ENUM('RESET','EMAIL_CHANGE','EMAIL_CHANGED','INVITE') NOT NULL,
+  outcome ENUM('DEVELOPMENT_LOG','PROVIDER_ACCEPTED','PROVIDER_REJECTED','PROVIDER_UNKNOWN','UNCONFIGURED') NOT NULL,
+  message_id VARCHAR(255) NULL,
+  error_code VARCHAR(80) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  INDEX idx_mail_events_created (created_at),
+  INDEX idx_mail_events_user (user_id,created_at)
+);
+
+CREATE TABLE IF NOT EXISTS grading_policy (
+  id TINYINT UNSIGNED PRIMARY KEY,
+  label VARCHAR(100) NOT NULL,
+  minimum DECIMAL(6,2) NOT NULL,
+  maximum DECIMAL(6,2) NOT NULL,
+  updated_by BIGINT UNSIGNED NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (updated_by) REFERENCES users(id),
+  CONSTRAINT chk_grade_policy_range CHECK (minimum < maximum)
+);
+
+CREATE TABLE IF NOT EXISTS grade_records (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  enrollment_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  value DECIMAL(6,2) NOT NULL,
+  status ENUM('DRAFT','PUBLISHED') NOT NULL DEFAULT 'DRAFT',
+  graded_by BIGINT UNSIGNED NOT NULL,
+  published_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (enrollment_id) REFERENCES enrollments(id),
+  FOREIGN KEY (graded_by) REFERENCES users(id),
+  INDEX idx_grade_status (status)
+);

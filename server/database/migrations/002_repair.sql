@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS schedule_attachments (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  title VARCHAR(180) NOT NULL,
+  description VARCHAR(1000) NOT NULL,
+  term_id BIGINT UNSIGNED NOT NULL,
+  section_id BIGINT UNSIGNED NULL,
+  offering_id BIGINT UNSIGNED NULL,
+  audience ENUM('ALL','SECTION','OFFERING') NOT NULL,
+  status ENUM('DRAFT','PUBLISHED','ARCHIVED') NOT NULL DEFAULT 'DRAFT',
+  storage_key CHAR(64) NOT NULL UNIQUE,
+  mime_type ENUM('image/png','image/jpeg','image/webp') NOT NULL,
+  width SMALLINT UNSIGNED NOT NULL,
+  height SMALLINT UNSIGNED NOT NULL,
+  version SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (term_id) REFERENCES academic_terms(id),
+  FOREIGN KEY (section_id) REFERENCES sections(id),
+  FOREIGN KEY (offering_id) REFERENCES subject_offerings(id),
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  INDEX idx_attachment_scope (term_id,status,audience)
+);

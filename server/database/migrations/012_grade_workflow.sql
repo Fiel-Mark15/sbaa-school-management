@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS grading_policy_versions (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  label VARCHAR(100) NOT NULL,
+  minimum DECIMAL(6,2) NOT NULL,
+  maximum DECIMAL(6,2) NOT NULL,
+  passing_value DECIMAL(6,2) NULL,
+  pass_direction ENUM('AT_LEAST','AT_MOST') NULL,
+  created_by BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
