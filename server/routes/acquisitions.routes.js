@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { getPrivateObject, putPrivateObject, deletePrivateObject } from '../utils/private-storage.js';
 import path from 'node:path';
 import { pool } from '../database/pool.js';
 import { authenticate } from '../middleware/auth.js';
@@ -10,7 +9,7 @@ import { fail, ok } from '../utils/response.js';
 import { env } from '../config/env.js';
 
 const router=Router();router.use(authenticate);
-const storageDir=process.env.UPLOAD_DIR?path.resolve(process.env.UPLOAD_DIR):fileURLToPath(new URL('../private-uploads/',import.meta.url));
+const objectName=key=>`acquisition-${key}`;
 const id=value=>Number.isSafeInteger(Number(value))&&Number(value)>0?Number(value):null;
 const statuses=['DRAFT','SUBMITTED','APPROVED','REJECTED','ORDERED','RECEIVED','CANCELLED'];
 const categories=['SUPPLIES','EQUIPMENT','BOOKS','LEARNING_RESOURCES'];
@@ -40,11 +39,11 @@ function valid(body){
 async function storeAttachment(file){
   if(!file)return null;
   const mime=documentType(file);if(!mime)throw Object.assign(new Error('Use a real PDF, PNG, or JPEG attachment.'),{status:422});
-  const key=randomBytes(32).toString('hex');await mkdir(storageDir,{recursive:true,mode:0o700});await writeFile(path.join(storageDir,`acquisition-${key}`),file.buffer,{flag:'wx',mode:0o600});
+  const key=randomBytes(32).toString('hex');await putPrivateObject(objectName(key),file.buffer,mime);
   return {key,name:path.basename(file.originalname).slice(0,180)||'attachment',mime};
 }
-async function removeAttachment(key){if(key)try{await unlink(path.join(storageDir,`acquisition-${key}`));}catch(error){if(error.code!=='ENOENT')console.error('Acquisition attachment cleanup failed:',error.code||'UNKNOWN');}}
-function canRead(user,row){return user.role==='ADMIN'||Number(row.requester_id)===Number(user.sub);}
+async function removeAttachment(key){if(key)try{await deletePrivateObject(objectName(key));}catch(error){if(error.code!=='ENOENT')console.error('Acquisition attachment cleanup failed:',error.code||'UNKNOWN');}}
+export function canRead(user,row){return user.role==='ADMIN'||Number(row.requester_id)===Number(user.sub);}
 const details=`a.id,a.requester_id requesterId,a.reviewer_id reviewerId,a.title,a.category,a.description,a.quantity,a.unit,a.purpose,a.needed_by neededBy,a.estimated_unit_cost estimatedUnitCost,(a.quantity*a.estimated_unit_cost) estimatedTotal,a.status,a.attachment_name attachmentName,a.created_at createdAt,a.updated_at updatedAt,a.archived_at archivedAt,CONCAT(u.first_name,' ',u.last_name) requesterName`;
 
 router.get('/',async(req,res,next)=>{try{
@@ -72,7 +71,7 @@ router.get('/:id/attachment',async(req,res,next)=>{try{
   const requestId=id(req.params.id);if(!requestId)return fail(res,'Invalid request.',422);
   const [[row]]=await pool.execute('SELECT requester_id,attachment_key,attachment_name,attachment_mime FROM acquisitions WHERE id=? AND archived_at IS NULL',[requestId]);
   if(!row||!row.attachment_key||!canRead(req.user,row))return fail(res,'Attachment not found.',404);
-  const data=await readFile(path.join(storageDir,`acquisition-${row.attachment_key}`));
+  const data=await getPrivateObject(objectName(row.attachment_key));
   res.set({'Content-Type':row.attachment_mime,'Content-Disposition':`attachment; filename="${row.attachment_mime==='application/pdf'?'resource-request.pdf':row.attachment_mime==='image/png'?'resource-request.png':'resource-request.jpg'}"`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}).send(data);
 }catch(error){next(error);}});
 router.post('/',acceptUpload,async(req,res,next)=>{

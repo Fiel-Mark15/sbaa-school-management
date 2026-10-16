@@ -16,18 +16,45 @@ async function retryTemporaryDns(operation){
 const senderAddress=()=>env.smtp.from?.match(/^SBAA School Portal <([^<>\s@]+@[^<>\s@]+)>$/)?.[1]?.toLowerCase();
 export function mailAvailable(){
   if(env.mailMode==='development')return process.env.NODE_ENV!=='production';
+  if(env.mailMode==='resend')return Boolean(env.resendApiKey && /^SBAA School Portal <[^<>\s@]+@[^<>\s@]+>$/.test(env.mailFrom));
   if(env.mailMode!=='smtp'||!env.smtp.host||!env.smtp.from||!Number.isInteger(env.smtp.port)||env.smtp.port<1||env.smtp.port>65535)return false;
   if(env.smtp.port===465?!env.smtp.secure:env.smtp.secure)return false;
   if(env.smtp.host.toLowerCase()==='smtp.gmail.com')return Boolean(env.smtp.user&&env.smtp.password&&senderAddress()===env.smtp.user.toLowerCase());
   return Boolean(env.smtp.user)===Boolean(env.smtp.password);
 }
-export function safeMailErrorCode(error){const code=error?.code;return typeof code==='string'&&/^[A-Z0-9_]{2,64}$/.test(code)?code:'SMTP_ERROR';}
+export function safeMailErrorCode(error){const code=error?.code;return typeof code==='string'&&/^[A-Z0-9_]{2,64}$/.test(code)?code:'MAIL_ERROR';}
 // A transport error after DATA may occur after provider acceptance. Never assume
 // that a missing acknowledgement means the emailed link was not delivered.
 export function mailFailureOutcome(error){
-  return ['EDNS','EAI_AGAIN','EAUTH','EENVELOPE'].includes(error?.code)?'PROVIDER_REJECTED':'PROVIDER_UNKNOWN';
+  return ['EDNS','EAI_AGAIN','EAUTH','EENVELOPE','HTTP_400','HTTP_401','HTTP_403','HTTP_422'].includes(error?.code)?'PROVIDER_REJECTED':'PROVIDER_UNKNOWN';
 }
 export async function checkMailService(){if(!mailAvailable())throw new Error('Mail is not configured.');if(env.mailMode==='smtp')await retryTemporaryDns(()=>transport().verify());}
+async function sendViaResend({address,subject,text,html,logo}) {
+  // Do not automatically retry an ambiguous network failure: the provider may
+  // have accepted the first request even if its acknowledgement was lost.
+  let response;
+  try {
+    response = await fetch('https://api.resend.com/emails', {
+      method: 'POST', signal: AbortSignal.timeout(20000),
+      headers: { Authorization: `Bearer ${env.resendApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: env.mailFrom, to: [address], subject, text, html,
+        ...(html ? { attachments: [{ filename: 'sbaa-logo.png', content: logo.toString('base64'), content_id: 'sbaa-school-portal-logo' }] } : {}) })
+    });
+  } catch {
+    const error = new Error('Mail provider response was not confirmed.'); error.code = 'HTTP_UNKNOWN'; throw error;
+  }
+  if (!response.ok) {
+    const error = new Error('Mail provider rejected the request.'); error.code = `HTTP_${response.status}`; throw error;
+  }
+  let data;
+  try { data = await response.json(); } catch {
+    const error = new Error('Mail provider response was not confirmed.'); error.code = 'HTTP_UNKNOWN'; throw error;
+  }
+  if (typeof data?.id !== 'string' || !data.id) {
+    const error = new Error('Mail provider response was not confirmed.'); error.code = 'HTTP_UNKNOWN'; throw error;
+  }
+  return { messageId: data.id };
+}
 async function send({address,subject,text,html,devLine}){
   if(env.mailMode==='development'){
     if(process.env.NODE_ENV==='production')throw new Error('Development mail cannot run in production.');
@@ -36,6 +63,7 @@ async function send({address,subject,text,html,devLine}){
   }
   if(!mailAvailable())throw new Error('Mail is not configured.');
   const logo=await readFile(new URL('../../public/assets/sbaa-logo.png',import.meta.url));
+  if(env.mailMode==='resend')return sendViaResend({address,subject,text,html,logo});
   const result=await retryTemporaryDns(()=>transport().sendMail({from:env.smtp.from,to:address,subject,text,html,attachments:html?[{filename:'sbaa-logo.png',content:logo,cid:'sbaa-school-portal-logo',contentDisposition:'inline'}]:[]}));
   if(result.rejected?.length||!result.accepted?.length)throw new Error('Mail provider rejected the recipient.');
   return {messageId:result.messageId};

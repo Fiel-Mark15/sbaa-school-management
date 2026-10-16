@@ -1,107 +1,99 @@
-# SBAA deployment runbook (Cloudflare Pages + Oracle Always Free)
+# SBAA deployment runbook — Cloudflare Pages + Render + Aiven + Supabase Storage
 
-Status: repository preparation only. Nothing here has been provisioned, pushed, published, or populated with real school records. This is not approval to launch a production school system. The local database and uploads remain unchanged.
+Status: preparation only. The Cloudflare Pages site exists, an Aiven MySQL Free service and an empty private Supabase bucket have been reported, and Render deployment is pending. Provider credentials, database connectivity, object writes, email delivery, and end-to-end authentication have not been verified by this runbook. Do not publish real school records until the launch gates below are resolved and approved. Keep the working local `.env`, database, and private uploads unchanged.
 
-## Architecture and limits
+## Architecture and launch gates
 
-- Cloudflare Pages serves `client/dist`. Its `client/functions/api/[[path]].js` Function forwards `/api/*` over HTTPS to the Oracle reverse proxy. The browser sees a single origin, so the production `HttpOnly; Secure; SameSite=Lax` session cookie can work without third-party cookies. All Vue API calls use `/api`; the frontend bundle has no production localhost API dependency. Pages' default SPA fallback serves `index.html` for history routes when there is no top-level `404.html`.
-- Oracle Ubuntu ARM64 VM runs Express, a separate class-reminder worker, MySQL, and a private persistent upload directory. MySQL listens only on loopback. Only the HTTPS reverse proxy is exposed; Express binds to `127.0.0.1` in production. The Pages proxy supplies an exact origin and a shared proxy secret; the reverse proxy rejects requests without that secret. This is defense in depth, not a substitute for network/firewall rules.
-- Cloudflare Free Pages Functions share the Workers Free limit of 100,000 requests/day. At 2,000 users, that is only 50 API calls/user/day on average. Static assets do not consume Function calls. Monitor actual usage before any school launch. Oracle Always Free A1 capacity is subject to home-region availability and possible idle reclamation. The free allowance currently includes 2 OCPUs/12 GB for Always Free accounts and 200 GB total boot/block volume storage with five volume backups. These are quotas, **not** a capacity, availability, support, or permanent-₱0 guarantee for 2,000 users. Verify the console's current terms and do not select paid resources without approval.
-- A stable HTTPS `API_ORIGIN` is required, such as `https://api.school.example`. A school-owned domain/subdomain or other stable, trusted certificate path must be supplied. An IP-only HTTP origin, self-signed certificate, or ephemeral tunnel URL is not production-ready. If the school does not already control a domain, strict ₱0 cannot currently be promised.
+Cloudflare Pages serves the Vue build and runs `client/functions/api/[[path]].js` for `/api/*`. The Function forwards to the Render HTTPS origin, preserving same-origin, host-only, HttpOnly/Secure/SameSite=Lax session cookies. Express requires the Function's private shared secret on application routes. A direct `GET /api/health` is allowed for Render health checks. The browser build uses `/api`, not a `VITE_API_URL` or localhost.
 
-## 1. Source and private backup gate
+Render Free has an ephemeral filesystem and no persistent disk. Configure `PRIVATE_STORAGE_MODE=supabase` with the private `sbaa-private-uploads` bucket before deploying. The server checks the bucket metadata and refuses to boot if it is missing or public. The server alone reads/writes Supabase Storage; browser downloads remain authenticated SBAA API routes, with MySQL ownership/audience checks. Do not create public URLs, signed browser URLs, or a static `/uploads` route. Local development retains `PRIVATE_STORAGE_MODE=filesystem` and its existing upload directory.
 
-Work from the project root. `server/.env`, uploads, SQL dumps, logs, private keys, and tokens are ignored by Git. Never run `db:seed` against a real database: it inserts fictional accounts and logs a known development password. Never upload a full local SQL dump as demo content. The `server/scripts/backup-private.js` command creates a full private SQL dump, copies private uploads, records SHA-256 checksums, and creates a separately scoped administrator-only export; it requires an absolute destination outside the repository. On this Mac a verified private backup was made before further deployment edits. Keep an additional encrypted off-machine copy under school control before relying on it for disaster recovery.
+Render Free also spins down when idle. Class reminders are in-app notices with MySQL deduplication, but the minute-loop worker cannot run reliably on a sleeping web service. Set `RUN_REMINDER_SCHEDULER=false` for the pilot and clearly disable the reminder promise in school-facing communications. To enable reminders later, use an approved always-on worker or scheduled job that invokes `server/services/reminder-worker.js` or a bounded one-shot variant, with one active scheduler and a real-occurrence/restart test. A visitor's open browser tab is not a scheduler.
 
-```bash
-cd /path/to/sbaa_school_management
-npm ci
-npm ci --prefix server
-npm ci --prefix client
-npm run build
-npm run test:proxy --prefix client
-npm run test:session-cookie --prefix server
-```
+Render Free blocks outbound SMTP ports 25, 465, and 587. Keep local Gmail `MAIL_MODE=smtp` unchanged. For Render use `MAIL_MODE=resend`, a privately configured Resend API key, and `MAIL_FROM=SBAA School Portal <sender@verified-domain>`; the school must approve and verify the sending domain. The HTTPS adapter preserves current templates and inline seal. A provider API success means acceptance, **not** inbox delivery. Controlled recipient inbox receipt and single-use link completion remain separate launch checks. Do not use development-log mode in production.
 
-The existing `server/tests/*.test.js` integration scripts are destructive to their target database by design (they create, update and delete temporary records). They must run only against an isolated disposable database and test-only server; do not point them at the local school database or a deployed service. Set `TEST_SEED_PASSWORD` privately to the password of the fictional seed fixtures, and review mail mode before running. A clean build and unit checks are not substitutes for those tests.
+## Repository and private backup
 
-## 2. Cloudflare Pages settings
+Repository: `Fiel-Mark15/sbaa-school-management` is currently **public**. Treat every push as immediate public disclosure and automatic Cloudflare production deployment. `.gitignore` excludes `.env*` except sanitized examples, logs, uploads, backups, private keys/certificates, and SQL dumps except source schema/migrations; it does not remove data already committed in Git history. Review staged files, all reachable Git history, and built frontend assets before any push. Never commit credentials, tokens, student files, or full SQL exports. If a real secret was ever committed, rotate it even after removing the file. Preserve a verified encrypted database-plus-upload backup outside the repository. Do not run `db:seed` on production; it is a fictional local development seed.
 
-Connect a **private** repository only after source review and explicit approval. Set project root directory `client`, build command `npm ci && npm run build`, output directory `dist`, Node.js 20 or newer. `vite.config.js` copies the shared `public/` assets (including `_routes.json`) into `dist`; `client/functions/` supplies the `/api/*` proxy. Do not create a top-level `404.html`, or the Pages SPA history fallback changes. Verify `/login` and `/reset-password` both return the Vue app on refresh.
+Use an isolated, empty test database for any database-writing test. Never run the integration suite against the existing local school database or Aiven production service. Source schema and migrations need a reviewed migration/rollback plan. `server/database/schema.sql` contains `CREATE DATABASE IF NOT EXISTS school_portal` and `USE school_portal`; **do not run it unchanged against the isolated target**. After explicit authorization, create a distinct empty test database and test-only MySQL user, make a reviewed temporary copy of the schema with only those two database-selection statements removed, apply that copy while connected to the test database, and set `DB_NAME` to that test database for `server/database/migrate.js`. Check the selected database with `SELECT DATABASE()` and confirm its table inventory before and after; abort on any mismatch. The migration script changes data as well as schema, so take a restorable snapshot of the disposable test database first. Keep its credentials out of Git. Do not overwrite existing tables or import a full local dump. Only after the isolated dry run passes should a separate, approved production migration be planned.
 
-Set these in Pages production Function environment, **not** as `VITE_` variables:
+For administrator-only migration, review identity, existing password hash, foreign keys, and approved asset references. Exclude `auth_sessions`, reset/email tokens, disposable test accounts, test announcements, and development mail events. Real student records need separate school authorization, mapping, privacy review, and rollback. Back up database and private files together; perform an isolated restore drill before launch.
+
+## Render Free Node.js Web Service settings
+
+| Field | Value |
+| --- | --- |
+| Repository | `Fiel-Mark15/sbaa-school-management` |
+| Root Directory | Leave empty (repository root); `server` imports sibling `shared/` |
+| Runtime / plan | Node.js / Free, pilot only |
+| Build Command | `npm ci --prefix server` |
+| Start Command | `npm run start --prefix server` |
+| `NODE_VERSION` | `22.16.0` (pin rather than rely on a changing default) |
+| Health Check Path | `/api/health` |
+| Port/bind | Use Render's `PORT`; production Express binds `0.0.0.0` |
+
+Set the following **private Render runtime variables**. Replace angle-bracket placeholders with values from the actual service dashboards; never commit them or print them to logs.
 
 | Name | Value |
 | --- | --- |
-| `API_ORIGIN` | Exact Oracle HTTPS API origin, e.g. `https://api.school.example` (no path or trailing slash) |
-| `PROXY_SHARED_SECRET` | New long random secret; also configure at the Oracle reverse proxy |
+| `NODE_ENV` | `production` (also set by Render at runtime) |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Exact Aiven MySQL Connection information; `DB_PASSWORD` is a MySQL password, not a portal password |
+| `DB_SSL_CA` | Complete Aiven project CA PEM certificate, as a private multiline variable; `\\n` newlines are also accepted |
+| `DB_POOL_LIMIT` | `10` initially; adjust only after load testing |
+| `CLIENT_URL`, `APP_PUBLIC_URL` | Same exact Cloudflare production HTTPS origin, no path/trailing slash |
+| `SESSION_TRANSPORT` | `cookie` |
+| `CSRF_SECRET` | New cryptographically random value, at least 32 characters |
+| `PROXY_SHARED_SECRET` | Different random value, at least 32 characters; same value in Cloudflare Pages Function secret |
+| `MAIL_MODE` | `resend` for Render Free; `smtp` remains available locally or on SMTP-capable hosting |
+| `RESEND_API_KEY` | Private key from an approved account, never a `VITE_` variable |
+| `MAIL_FROM` | `SBAA School Portal <sender@verified-school-domain>`; domain/sender must be verified by the provider |
+| `RUN_REMINDER_SCHEDULER` | `false` for the Free pilot |
+| `PRIVATE_STORAGE_MODE` | `supabase` on Render Free (`filesystem` for local development) |
+| `SUPABASE_URL` | Exact HTTPS Supabase project origin, e.g. `https://<project-ref>.supabase.co` |
+| `SUPABASE_SECRET_KEY` | Supabase `sb_secret_...` server secret key (not the legacy JWT service-role key); private Render variable only, never a `VITE_` variable or Pages secret |
+| `SUPABASE_BUCKET` | `sbaa-private-uploads` |
+| `UPLOAD_DIR` | Local filesystem mode only; do not set on Render Free |
 
-Only the public client URL goes in Express `CLIENT_URL` and `APP_PUBLIC_URL`; they must be exactly the production Pages origin. The login, reset, and email-verification links then open that site. Pages preview URLs will not be accepted by the production API unless separately designed and authorized. Never place DB, SMTP, CSRF, or proxy secrets in a `VITE_` variable, repository file, or Pages public asset.
+Do not set a hard-coded `PORT`. Keep the Render URL out of the Vue bundle; only the Pages Function needs it. Express trusts one Render ingress proxy hop in production. The Pages Function replaces `X-Forwarded-For` with `CF-Connecting-IP`; verify the observed client IP and rate-limit keys at deployment, and do not trust arbitrary forwarded headers from direct clients. The backend compares the proxy secret in constant time; only the health-check GET/HEAD bypasses it. Keep the health response minimal and uncacheable.
 
-## 3. Oracle VM and storage
+### Aiven MySQL 8.4 TLS
 
-Before provisioning, confirm the selected A1 shape, home region, boot/block size, backups, and egress remain marked Always Free in the account. A starting topology is one Ubuntu ARM64 A1 VM with 2 OCPUs and 12 GB RAM, a 50 GB boot volume, and a separately mounted 50 GB block volume for MySQL data, uploads, and private local backup staging. That leaves 100 GB of the 200 GB allowance unallocated; adjust only after measuring actual data and quota. Attach the block volume with a stable UUID mount in `/etc/fstab`, then verify it is mounted before starting MySQL or Express. Never fall back silently to the disposable application checkout. Restrict SSH to approved administrators, allow inbound 80/443 only, and do not expose 3306 or 5050.
+The shared `env.db` configuration supplies mysql2's pool and migration connection with the Aiven CA, `rejectUnauthorized: true`, and identity verification. Never set `rejectUnauthorized: false`. Use the exact Aiven hostname, not an IP or unrelated CNAME. Restrict the database user to TLS connections; Aiven MySQL does not enforce TLS for all users automatically. Confirm a nonempty `Ssl_cipher` after connecting, and plan for Aiven CA rotation. Aiven Free has no VPC/private connection; use verified TLS over its public endpoint and least-privilege credentials. Verify the service's 1 GB storage and connection limits before real use.
 
-Install supported ARM64 Node.js 20+ (check `node -v` and `uname -m`), MySQL 8+, Nginx, and a trusted ACME certificate client. Use a dedicated unprivileged `sbaa` OS user. Keep code under `/opt/sbaa` and data under `/srv/sbaa`; example permissions:
+### Supabase private storage
 
-```bash
-sudo install -d -o sbaa -g sbaa -m 0700 /srv/sbaa/uploads /srv/sbaa/backups
-sudo install -d -o root -g root -m 0700 /etc/sbaa
-```
+In Supabase Storage, create a standard bucket with the exact ID `sbaa-private-uploads` and **Public disabled**. Restrict its upload size and MIME types to the portal's accepted formats (WebP, PNG, JPEG, PDF), allowing at least 10 MB per object. Do not add anonymous or authenticated-user RLS policies for this bucket. Store the new `sb_secret_` server key only in Render's private environment; the adapter sends it in the `apikey` header, not as a bearer JWT. Do not use Supabase Auth; SBAA authentication and object-level authorization stay in Express/MySQL. At startup, Render makes a read-only bucket metadata check and fails if the bucket is public or unavailable. This is not a live upload probe: before launch, use synthetic files through the authenticated SBAA routes to verify create, read, replace, and delete, including forbidden cross-account reads. Supabase key rotation requires a Render redeploy.
 
-Set MySQL `bind-address=127.0.0.1`, create a dedicated least-privilege application user restricted to `127.0.0.1`, and set a strong *MySQL* `DB_PASSWORD` independent of portal login and Gmail App Password. Keep MySQL's data directory on the mounted persistent volume if boot-volume retention is not guaranteed. Install repository dependencies with `npm ci --prefix server` from `/opt/sbaa`. Install schema only in a newly created empty `school_portal` database and then run `npm run db:migrate --prefix server` **after** a reviewed backup. `server/database/schema.sql` contains `CREATE DATABASE` and `USE school_portal`; do not run it on an existing database without review. Do not run `db:seed` in production.
+Existing MySQL `storage_key` values remain unchanged. The adapter maps them to the same opaque filenames as the current disk store: `profile-<key>.webp`, `<key>.webp` for schedule images, `announcement-<key>.webp`, and `acquisition-<key>`; it rejects other paths. Supabase objects are never exposed directly to browsers.
 
-Create `/etc/sbaa/server.env` as root-readable mode `0600` (fill values privately; this file is not in Git):
+**Existing-file migration is manual and approval-gated.** First take encrypted, independently verified backups of Aiven/MySQL and the complete local `UPLOAD_DIR`; record checksums and counts. Export a reviewed manifest of only approved DB-referenced objects (profile photos, schedule/announcement images, acquisitions), mapping each DB key to its existing filename. Do not upload real files from a development machine automatically. With school authorization, copy each file into the private bucket under its exact mapped filename, verify byte checksum and server-side authenticated retrieval, compare DB references and counts, then switch Render to Supabase mode. Keep the original backups and filesystem copy through a defined rollback window. Roll back by restoring the previous backend configuration and private file copy, or by restoring database/object snapshots to isolated targets before cutover; never overwrite the only working copy. The existing `backup:private` script covers local files only and is **not** a Supabase object backup. Schedule a separate encrypted off-provider export of Supabase objects alongside the MySQL backup before production use.
 
-```dotenv
-NODE_ENV=production
-PORT=5050
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_NAME=school_portal
-DB_USER=sbaa_app
-DB_PASSWORD=<private-mysql-password>
-DB_POOL_LIMIT=10
-CLIENT_URL=https://<actual-pages-host>
-APP_PUBLIC_URL=https://<actual-pages-host>
-SESSION_TRANSPORT=cookie
-CSRF_SECRET=<new-random-32-plus-character-secret>
-UPLOAD_DIR=/srv/sbaa/uploads
-RUN_REMINDER_SCHEDULER=false
-MAIL_MODE=smtp
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=465
-SMTP_SECURE=true
-SMTP_USER=<authorized-full-gmail-address>
-SMTP_PASSWORD=<private-google-app-password>
-MAIL_FROM="SBAA School Portal <sender@gmail.com>"
-```
+## Cloudflare Pages settings
 
-The values in angle brackets are instructions, not usable values; replace `sender@gmail.com` with the same authorized address as `SMTP_USER`. Generate the CSRF and proxy secrets locally with a cryptographic random generator; never print them to logs or commit them. `DB_PASSWORD` is the MySQL password. `server/.env` on the Mac is deliberately untouched. `JWT_SECRET` is not used by the current database-backed session implementation. Do not paste a local `.env` into a cloud dashboard wholesale.
+| Field | Value |
+| --- | --- |
+| Repository | `Fiel-Mark15/sbaa-school-management` |
+| Root Directory | `client`; sibling `shared/` and root `public/` remain available at build time |
+| Framework | Vue / Vite |
+| Build Command | `npm ci && npm run build` |
+| Build Output Directory | `dist` |
+| `NODE_VERSION` | `22.16.0` |
+| Functions | `client/functions/api/[[path]].js` discovered at Pages project root, not inside `dist` |
+| Function routes | Root `public/_routes.json` is copied by Vite to `dist/_routes.json`, restricting Functions to `/api/*` |
+| `API_ORIGIN` | Private Function variable: exact Render HTTPS origin, e.g. `https://<service>.onrender.com`, no path/trailing slash |
+| `PROXY_SHARED_SECRET` | Private Function secret, same as Render; never prefix with `VITE_` |
+| `VITE_API_URL` | Leave unset for production; Vue calls same-origin `/api` |
 
-Run two systemd units as `sbaa`, both reading `/etc/sbaa/server.env`:
+Keep the top-level built output without a `404.html` so Pages' Vue SPA fallback handles refreshed `/login`, `/reset-password`, and verification routes. Configure both Pages and Render origins before building or sending emails; `APP_PUBLIC_URL` must be the actual public Pages address, never `localhost`. Preview Pages URLs are not automatically allowed by the production API. If a custom domain replaces the `pages.dev` domain, update both URL settings and redeploy the relevant configuration before sending links.
 
-| Unit | Working directory | ExecStart | Restart |
-| --- | --- | --- | --- |
-| `sbaa-api.service` | `/opt/sbaa/server` | `/usr/bin/node /opt/sbaa/server/app.js` | `on-failure` |
-| `sbaa-reminders.service` | `/opt/sbaa/server` | `/usr/bin/node /opt/sbaa/server/services/reminder-worker.js` | `on-failure` |
+## Verification and restoration gates
 
-Use the actual `command -v node` path on the VM. Set `After=network-online.target mysql.service` and `RequiresMountsFor=/srv/sbaa`, plus `NoNewPrivileges=true`, `ProtectSystem=strict`, `ReadWritePaths=/srv/sbaa/uploads`, and a dedicated user. Set `TimeoutStopSec=30`. Only one reminder worker should run. Reminder delivery has a durable MySQL unique key per meeting, occurrence, and user, so restarts do not duplicate in-app notices; verify after an actual scheduled class. The worker is not an email service.
+1. On a disposable database, run `npm ci --prefix server`, `npm ci --prefix client`, `npm run build --prefix client`, `npm run test:proxy --prefix client`, `npm run test:session-cookie --prefix server`, `npm run test:deployment-security --prefix server`, `npm run test:private-storage --prefix server`, and `node server/tests/private-storage-local.test.js`. Run database integration tests only on an isolated test database.
+2. Confirm Render reaches `/api/health` and Pages `/api/health` through its Function; direct Render application routes without the shared secret must return 403. Confirm HTTPS cookies, CSRF rejection, role and ownership restrictions, and real client IP rate limiting.
+3. Confirm Aiven TLS and migration against a newly created **empty** authorized database, then perform reviewed data migration. Do not use the fictional seed for real accounts. Verify private object references and account records survive restart/redeploy.
+4. Verify API provider acceptance, recipient inbox/spam receipt, reset and current-email verification from received links, single use, and old-session revocation as separate results. No provider acceptance alone proves delivery.
+5. Verify login, registration, profile/photos, announcements/attachments, grades, schedules, and cross-role denials from a separate device. Keep reminders disabled until a reliable scheduler passes an occurrence and restart-deduplication test.
+6. Store encrypted off-provider backups of the Aiven database and private object storage together. For restoration, restore to a new isolated database and private bucket, validate checksums/foreign keys/storage keys, test role-scoped retrieval, then cut over only after authorization. Never restore over the sole working copy.
 
-Configure Nginx with a valid certificate for the exact `API_ORIGIN`, proxy `/api/` to `http://127.0.0.1:5050`, preserve `Host`/`Origin`, and set `X-Forwarded-Proto https`. Reject requests whose `X-SBAA-Proxy-Secret` is not the exact Pages Function secret *before* proxying. Forward only the Pages Function's trusted `X-Forwarded-For` value, not a client-supplied chain; restrict the origin to Cloudflare traffic or use an authenticated tunnel. Keep Nginx config root-readable because it contains the proxy secret. Express trusts one reverse proxy hop in production for per-IP rate limits. Check the actual proxy chain before relying on those limits. Terminate TLS at Nginx; do not expose Express directly.
-
-## 4. Mail, data migration, and backups
-
-Oracle documents default outbound blocking for TCP 25 on newer tenancies, **not** a guarantee that Gmail 465 works. Test outbound TLS to `smtp.gmail.com:465` from the VM, then use a controlled non-student recipient to verify SMTP acceptance, inbox receipt, and the link flow separately. If 465 is unavailable or Gmail rejects authentication/quota, stop: use an approved HTTPS transactional-email service only after checking its current free tier and adding an adapter, or obtain a supported network/email arrangement. Do not silently switch to development logging. A Google App Password is not a portal password or MySQL password.
-
-Do **not** restore the full local backup to public infrastructure: it contains real or unreviewed data, sessions, reset tokens, test accounts, and announcements. The private administrator-only export is a starting artifact, not an automated production migration: review administrator identity, hashed password, schema compatibility, profile photo reference, and all foreign keys before importing it to a fresh production database. Never import active `auth_sessions`, `password_reset_tokens`, `email_change_tokens`, `email_verification_tokens`, development mail logs, or `.test` accounts. Genuine school records require a separate school-authorized mapping, privacy review, identity reconciliation, validation, and rollback plan. Migrate only approved uploads and confirm every database storage-key reference resolves in `/srv/sbaa/uploads` with role-scoped retrieval.
-
-Before every migration/deploy, take a consistent SQL+upload backup, verify checksums and a test restore on isolated infrastructure, and keep an encrypted off-VM copy under school control. Oracle's five included volume backups are supplementary snapshots, not a proven application-consistent restore or off-provider copy. For restoration, stop API/worker, restore a verified SQL dump to a *new* empty database, restore matching uploads to the mounted volume, check foreign keys and image references, then switch services to the restored database only after approval. Do not test restoration by overwriting the local or production database.
-
-## 5. Acceptance gate (another device)
-
-Before declaring deployment complete, verify on a separate device/network: `/api/health`, refreshed Vue history routes, administrator/faculty/student login and cross-role denial; registration and subsequent account persistence; profile edits and private photos; announcements and attachments; grades only for authorized enrollment; schedules and exports; reset and current-email verification via **received** messages; old session revocation and single-use link consumption; a scheduled reminder with restart deduplication; data and image survival after VM restart and code redeploy. Check accessible error states and load-test at the expected concurrency. Confirm legal/privacy text and school identity-verification policy with authorized staff before real student data is published.
-
-No step above has yet verified a Cloudflare/Oracle deployment, Gmail acceptance from Oracle, recipient inbox receipt, ARM64 runtime, or recovery from a cloud backup. Those require access, a stable HTTPS origin, explicit deployment/data authorization, and resource decisions.
-
-Current platform references: [Cloudflare Pages SPA fallback](https://developers.cloudflare.com/pages/configuration/serving-pages/), [Pages Functions routes and Free request behavior](https://developers.cloudflare.com/pages/functions/routing/), [Pages Functions pricing](https://developers.cloudflare.com/pages/functions/pricing/), [Oracle Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm), and [Oracle's outbound TCP 25 restriction](https://docs.oracle.com/en-us/iaas/releasenotes/changes/f7e95770-9844-43db-916c-6ccbaf2cfe24/). Recheck limits and terms in the account before deployment.
+Official platform limits: [Render Free](https://render.com/docs/free), [Render port binding](https://render.com/docs/web-services#port-binding), [Cloudflare Pages monorepos](https://developers.cloudflare.com/pages/configuration/monorepos/), [Cloudflare Functions](https://developers.cloudflare.com/pages/functions/get-started/), [Aiven MySQL Free](https://aiven.io/docs/products/mysql/concepts/mysql-free-tier), [Aiven TLS certificates](https://aiven.io/docs/platform/concepts/tls-ssl-certificates).

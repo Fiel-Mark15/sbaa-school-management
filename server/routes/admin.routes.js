@@ -19,7 +19,8 @@ router.get('/mail-diagnostics',authenticate,authorize('ADMIN'),async(req,res,nex
     const [events]=await pool.query(`SELECT m.id,m.purpose,m.outcome,m.message_id messageId,m.error_code errorCode,m.created_at createdAt
       FROM mail_delivery_events m WHERE (?=0 OR m.user_id=?) ORDER BY m.id DESC LIMIT 25`,[email?1:0,account?.id||0]);
     return ok(res,{
-      mode:env.mailMode||'unconfigured',configured:mailAvailable(),smtpHostConfigured:Boolean(env.smtp.host),smtpSenderConfigured:Boolean(env.smtp.from),smtpCredentialsConfigured:Boolean(env.smtp.user&&env.smtp.password),publicUrl:env.appPublicUrl,
+      mode:env.mailMode||'unconfigured',configured:mailAvailable(),smtpHostConfigured:Boolean(env.smtp.host),smtpSenderConfigured:Boolean(env.smtp.from),smtpCredentialsConfigured:Boolean(env.smtp.user&&env.smtp.password),
+      httpsProviderConfigured:Boolean(env.resendApiKey&&env.mailFrom),publicUrl:env.appPublicUrl,
       account:email?(account?{status:account.status,role:account.role}:null):undefined,
       events,
       note:'Provider acceptance does not prove mailbox delivery. Check provider logs, recipient spam, and school quarantine.'

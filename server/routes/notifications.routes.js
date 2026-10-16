@@ -2,9 +2,8 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { getPrivateObject, putPrivateObject, deletePrivateObject } from '../utils/private-storage.js';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { pool } from '../database/pool.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { fail, ok } from '../utils/response.js';
@@ -13,8 +12,7 @@ import { env } from '../config/env.js';
 const router=Router();router.use(authenticate);
 const visible="nr.archived_at IS NULL AND (COALESCE(n.resource_type,'')<>'announcement' OR EXISTS(SELECT 1 FROM announcements a WHERE a.id=n.resource_id AND a.status='PUBLISHED'))";
 const idOf=value=>Number.isSafeInteger(Number(value))&&Number(value)>0?Number(value):null;
-const imageDirectory=process.env.UPLOAD_DIR?path.resolve(process.env.UPLOAD_DIR):fileURLToPath(new URL('../private-uploads/',import.meta.url));
-const imagePath=key=>path.join(imageDirectory,`announcement-${key}.webp`);
+const objectName=key=>`announcement-${key}.webp`;
 const imageUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:1,fields:0,parts:1}}).single('image');
 function receiveImage(req,res,next){
   if(req.headers.origin&&req.headers.origin!==env.clientUrl)return fail(res,'Untrusted upload origin.',403);
@@ -74,7 +72,7 @@ router.get('/announcements/:id/image',async(req,res,next)=>{
       const [[permission]]=await pool.execute("SELECT 1 allowed FROM notifications n JOIN notification_recipients nr ON nr.notification_id=n.id WHERE n.resource_type='announcement' AND n.resource_id=? AND nr.user_id=? LIMIT 1",[id,req.user.sub]);
       if(!permission)return fail(res,'Announcement image not found.',404);
     }
-    const data=await readFile(imagePath(image.storageKey));
+    const data=await getPrivateObject(objectName(image.storageKey));
     return res.set({'Content-Type':'image/webp','Content-Disposition':'inline; filename="announcement.webp"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}).send(data);
   }catch(error){if(error.code==='ENOENT')return fail(res,'Announcement image is unavailable.',404);next(error);}
 });
@@ -89,20 +87,20 @@ router.put('/announcements/:id/image',authorize('ADMIN'),receiveImage,async(req,
   }catch{return fail(res,'Use a real JPEG, PNG, or WebP image within 5 MB and 12 megapixels.',422);}
   const key=randomBytes(32).toString('hex');let oldKey;
   try{
-    await mkdir(imageDirectory,{recursive:true,mode:0o700});await writeFile(imagePath(key),image,{flag:'wx',mode:0o600});
+    await putPrivateObject(objectName(key),image,'image/webp');
     const output=await sharp(image).metadata(),connection=await pool.getConnection();
     try{
       await connection.beginTransaction();
       const [[announcement]]=await connection.execute('SELECT status FROM announcements WHERE id=? FOR UPDATE',[id]);
-      if(!announcement||announcement.status!=='DRAFT'){await connection.rollback();await unlink(imagePath(key)).catch(()=>{});return fail(res,'Only a draft announcement can receive or replace an image.',409);}
+      if(!announcement||announcement.status!=='DRAFT'){await connection.rollback();await deletePrivateObject(objectName(key)).catch(()=>{});return fail(res,'Only a draft announcement can receive or replace an image.',409);}
       const [[old]]=await connection.execute('SELECT storage_key storageKey FROM announcement_images WHERE announcement_id=? FOR UPDATE',[id]);oldKey=old?.storageKey;
       await connection.execute('INSERT INTO announcement_images(announcement_id,storage_key,original_name,width,height) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE storage_key=VALUES(storage_key),original_name=VALUES(original_name),width=VALUES(width),height=VALUES(height)',[id,key,path.basename(req.file.originalname).slice(0,180),output.width,output.height]);
       await connection.execute("INSERT INTO audit_logs(user_id,action,entity_type,entity_id) VALUES (?,'ANNOUNCEMENT_IMAGE_UPDATED','announcements',?)",[req.user.sub,id]);
       await connection.commit();
-      if(oldKey)unlink(imagePath(oldKey)).catch(error=>console.error('Announcement image cleanup:',error.code));
+      if(oldKey)deletePrivateObject(objectName(oldKey)).catch(error=>console.error('Announcement image cleanup:',error.code));
       return ok(res,{hasImage:true},'Announcement image saved.');
     }catch(error){await connection.rollback();throw error;}finally{connection.release();}
-  }catch(error){unlink(imagePath(key)).catch(()=>{});next(error);}
+  }catch(error){deletePrivateObject(objectName(key)).catch(()=>{});next(error);}
 });
 router.delete('/announcements/:id/image',authorize('ADMIN'),async(req,res,next)=>{
   const id=idOf(req.params.id);if(!id)return fail(res,'Invalid announcement.',422);
@@ -114,7 +112,7 @@ router.delete('/announcements/:id/image',authorize('ADMIN'),async(req,res,next)=
     const [[image]]=await connection.execute('SELECT storage_key storageKey FROM announcement_images WHERE announcement_id=? FOR UPDATE',[id]);key=image?.storageKey;
     if(key){await connection.execute('DELETE FROM announcement_images WHERE announcement_id=?',[id]);await connection.execute("INSERT INTO audit_logs(user_id,action,entity_type,entity_id) VALUES (?,'ANNOUNCEMENT_IMAGE_REMOVED','announcements',?)",[req.user.sub,id]);}
     await connection.commit();
-    if(key)unlink(imagePath(key)).catch(error=>console.error('Announcement image cleanup:',error.code));
+    if(key)deletePrivateObject(objectName(key)).catch(error=>console.error('Announcement image cleanup:',error.code));
     return ok(res,null,'Announcement image removed.');
   }catch(error){await connection.rollback();next(error);}finally{connection.release();}
 });

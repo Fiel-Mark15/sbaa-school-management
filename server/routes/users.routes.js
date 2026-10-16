@@ -1,8 +1,6 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
-import { readFile, unlink } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { getPrivateObject, deletePrivateObject } from '../utils/private-storage.js';
 import { pool } from '../database/pool.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { digest, revokeUserSessions } from '../utils/sessions.js';
@@ -194,8 +192,7 @@ router.get('/users/:id/photo',authorize('ADMIN'),async(req,res,next)=>{try{
   const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)return fail(res,'Invalid account.',422);
   const [[photo]]=await pool.execute('SELECT storage_key FROM profile_photos WHERE user_id=?',[id]);
   if(!photo)return fail(res,'No profile photo.',404);
-  const directory=process.env.UPLOAD_DIR?path.resolve(process.env.UPLOAD_DIR):fileURLToPath(new URL('../private-uploads/',import.meta.url));
-  const image=await readFile(path.join(directory,`profile-${photo.storage_key}.webp`));
+  const image=await getPrivateObject(`profile-${photo.storage_key}.webp`);
   return res.set({'Content-Type':'image/webp','Cache-Control':'private, no-store','Content-Disposition':'inline; filename="profile.webp"','X-Content-Type-Options':'nosniff'}).send(image);
 }catch(error){if(error.code==='ENOENT')return fail(res,'Profile photo is unavailable.',404);next(error);}});
 router.patch('/users/:id/identity',authorize('ADMIN'),async(req,res,next)=>{
@@ -294,7 +291,7 @@ router.delete('/users/:id',authorize('ADMIN'),async(req,res,next)=>{
     await connection.execute('DELETE FROM users WHERE id=?',[id]);
     await connection.execute('INSERT INTO audit_logs(user_id,action,entity_type,entity_id,metadata) VALUES (?,?,?,?,?)',[req.user.sub,'ACCOUNT_DELETED','users',id,JSON.stringify({reason:reason.trim(),deletedEmail:user.email,deletedExternalId:user.external_id,deletedRole:user.role})]);
     await connection.commit();
-    if(photoKey){const directory=process.env.UPLOAD_DIR?path.resolve(process.env.UPLOAD_DIR):fileURLToPath(new URL('../private-uploads/',import.meta.url));unlink(path.join(directory,`profile-${photoKey}.webp`)).catch(error=>console.error('Deleted account photo cleanup:',error.code));}
+    if(photoKey)deletePrivateObject(`profile-${photoKey}.webp`).catch(error=>console.error('Deleted account photo cleanup:',error.code));
     return ok(res,null,'Account permanently deleted.');
   }catch(error){await connection.rollback();if(error.code==='ER_ROW_IS_REFERENCED_2')return fail(res,'Protected records prevent permanent deletion. Archive this account instead.',409);next(error);}finally{try{await connection.query("SELECT RELEASE_LOCK('sbaa:admin:status')");}catch{}connection.release();}
 });

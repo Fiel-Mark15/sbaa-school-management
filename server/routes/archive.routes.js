@@ -1,13 +1,10 @@
 import { Router } from 'express';
-import { unlink } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { deletePrivateObject } from '../utils/private-storage.js';
 import { pool } from '../database/pool.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { fail, ok } from '../utils/response.js';
 
 const router=Router();router.use(authenticate,authorize('ADMIN'));
-const imageDirectory=process.env.UPLOAD_DIR?path.resolve(process.env.UPLOAD_DIR):fileURLToPath(new URL('../private-uploads/',import.meta.url));
 const id=value=>Number.isSafeInteger(Number(value))&&Number(value)>0?Number(value):null;
 const modules=['subjects','classes','firms','announcements','users','schedule_images'];
 const source=`(
@@ -73,7 +70,7 @@ router.delete('/:module(announcements|schedule_images)/:id',async(req,res,next)=
   const module=req.params.module,recordId=id(req.params.id),reason=req.body?.reason;
   if(!recordId||typeof reason!=='string'||!reason.trim()||reason.length>500)return fail(res,'Enter a valid archived record and deletion reason.',422);
   const table=module==='announcements'?'announcements':'schedule_attachments';
-  const connection=await pool.getConnection();let filePath=null;
+  const connection=await pool.getConnection();let objectName=null;
   try{
     await connection.beginTransaction();
     const [[record]]=await connection.execute(`SELECT storage_key storageKey FROM ${module==='announcements'?'announcement_images':'schedule_attachments'} WHERE ${module==='announcements'?'announcement_id':'id'}=? ${module==='announcements'?'':'AND status=\'ARCHIVED\''} FOR UPDATE`,[recordId]);
@@ -83,13 +80,13 @@ router.delete('/:module(announcements|schedule_images)/:id',async(req,res,next)=
       await connection.execute("DELETE nr FROM notification_recipients nr JOIN notifications n ON n.id=nr.notification_id WHERE n.resource_type='announcement' AND n.resource_id=?",[recordId]);
       await connection.execute("DELETE FROM notifications WHERE resource_type='announcement' AND resource_id=?",[recordId]);
       await connection.execute('DELETE FROM announcement_images WHERE announcement_id=?',[recordId]);
-      if(record?.storageKey)filePath=path.join(imageDirectory,`announcement-${record.storageKey}.webp`);
-    }else if(record?.storageKey)filePath=path.join(imageDirectory,`${record.storageKey}.webp`);
+      if(record?.storageKey)objectName=`announcement-${record.storageKey}.webp`;
+    }else if(record?.storageKey)objectName=`${record.storageKey}.webp`;
     await connection.execute(`DELETE FROM ${table} WHERE id=?`,[recordId]);
     await connection.execute('INSERT INTO audit_logs(user_id,action,entity_type,entity_id,metadata) VALUES (?,?,?,?,?)',[req.user.sub,'ARCHIVE_PERMANENTLY_DELETED',table,recordId,JSON.stringify({reason:reason.trim()})]);
     await connection.commit();
     let fileCleanupPending=false;
-    if(filePath)try{await unlink(filePath);}catch(error){if(error.code!=='ENOENT'){fileCleanupPending=true;console.error('Archive file cleanup failed:',error.code||'FILE_ERROR');}}
+    if(objectName)try{await deletePrivateObject(objectName);}catch(error){if(error.code!=='ENOENT'){fileCleanupPending=true;console.error('Archive file cleanup failed:',error.code||'FILE_ERROR');}}
     return ok(res,{fileCleanupPending},fileCleanupPending?'Record deleted; private file cleanup needs administrator attention.':'Archived record permanently deleted.');
   }catch(error){await connection.rollback();if(error.code==='ER_ROW_IS_REFERENCED_2')return fail(res,'Protected records still refer to this item. Keep it archived.',409);next(error);}finally{connection.release();}
 });

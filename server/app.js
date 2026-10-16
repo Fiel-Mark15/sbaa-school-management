@@ -21,11 +21,14 @@ import { errorHandler, notFound } from './middleware/errors.js';
 import { startClassReminderScheduler } from './services/class-reminders.js';
 import { enforceRequestOrigin } from './middleware/auth.js';
 import { pool } from './database/pool.js';
+import { requirePagesProxy } from './middleware/pages-proxy.js';
+import { assertPrivateStorageReady } from './utils/private-storage.js';
 
 assertEnvironment();
 const app = express();
 if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 app.disable('x-powered-by');
+app.use(requirePagesProxy);
 app.use(helmet()); app.use(cors({ origin: env.clientUrl, credentials: env.sessionTransport === 'cookie' }));
 app.use(enforceRequestOrigin);
 app.use(express.json({ limit: '100kb' }));
@@ -54,7 +57,8 @@ let server;
 let stopReminders;
 try {
   await pool.query('SELECT 1');
-  server = app.listen(env.port, process.env.NODE_ENV === 'production' ? '127.0.0.1' : undefined, () => {
+  await assertPrivateStorageReady();
+  server = app.listen(env.port, process.env.NODE_ENV === 'production' ? '0.0.0.0' : undefined, () => {
     console.log(`SBAA API listening on ${env.port}`);
     if (process.env.RUN_REMINDER_SCHEDULER === 'true' || (process.env.NODE_ENV !== 'production' && process.env.RUN_REMINDER_SCHEDULER !== 'false')) stopReminders = startClassReminderScheduler();
   });
@@ -66,7 +70,7 @@ try {
     process.exit(1);
   });
 } catch (error) {
-  console.error(`SBAA API cannot start: database check failed (${error.code || 'UNKNOWN'}).`);
+  console.error(`SBAA API cannot start: dependency check failed (${error.code || 'UNKNOWN'}).`);
   await pool.end();
   process.exitCode = 1;
 }

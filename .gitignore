@@ -8,8 +8,17 @@
 server/private-uploads/
 server/backups/
 private-backups/
+**/private-uploads/
+**/backups/
+**/*.dump
+**/*.bak
+**/*backup*.tar
+**/*backup*.tar.gz
+**/*backup*.zip
 *.pem
 *.key
+*.p12
+*.pfx
 **/*.sql.gz
 **/*.sql
 !server/database/schema.sql

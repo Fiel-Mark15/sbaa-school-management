@@ -21,7 +21,9 @@
     "test:archive": "node tests/archive.test.js",
     "test:manual-enrollment": "node tests/manual-enrollment.test.js",
     "test:class-reminders": "node tests/class-reminders.test.js",
-    "test:session-cookie": "node tests/session-cookie.unit.test.js"
+    "test:session-cookie": "node tests/session-cookie.unit.test.js",
+    "test:deployment-security": "node tests/deployment-security.test.js",
+    "test:private-storage": "node tests/private-storage.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

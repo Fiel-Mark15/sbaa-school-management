@@ -2,9 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { getPrivateObject, putPrivateObject, deletePrivateObject } from '../utils/private-storage.js';
 import rateLimit from 'express-rate-limit';
 import { pool } from '../database/pool.js';
 import { authenticate, authorize } from '../middleware/auth.js';
@@ -12,7 +10,7 @@ import { fail, ok } from '../utils/response.js';
 import { env } from '../config/env.js';
 
 const router=Router();router.use(authenticate);
-const storageDir=process.env.UPLOAD_DIR?path.resolve(process.env.UPLOAD_DIR):fileURLToPath(new URL('../private-uploads/',import.meta.url));
+const objectName=key=>`${key}.webp`;
 const id=value=>Number.isSafeInteger(Number(value))&&Number(value)>0?Number(value):null;
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:1,fields:10,parts:12}}).single('image');
 const uploadLimit=rateLimit({windowMs:60*60*1000,max:Number(process.env.ATTACHMENT_UPLOAD_LIMIT||20),standardHeaders:'draft-6',legacyHeaders:false,message:{success:false,message:'Upload limit reached. Try again later.'}});
@@ -30,7 +28,7 @@ async function encodeImage(file){
     return {data,width:info.width,height:info.height};
   }catch{throw new Error('Invalid image format or dimensions. Use a real PNG, JPEG, or WebP image.');}
 }
-async function accessible(user,row){
+export async function accessible(user,row){
   if(user.role==='ADMIN')return true;
   if(row.status!=='PUBLISHED')return false;
   if(row.audience==='ALL')return true;
@@ -53,7 +51,7 @@ router.get('/:id/image',async(req,res,next)=>{try{
   const attachmentId=id(req.params.id);if(!attachmentId)return fail(res,'Invalid attachment.',422);
   const [[row]]=await pool.execute('SELECT * FROM schedule_attachments WHERE id=?',[attachmentId]);
   if(!row||!await accessible(req.user,row))return fail(res,'Attachment not found.',404);
-  const data=await readFile(path.join(storageDir,`${row.storage_key}.webp`));
+  const data=await getPrivateObject(objectName(row.storage_key));
   res.set({'Content-Type':'image/webp','Content-Disposition':`${req.query.download==='true'?'attachment':'inline'}; filename="sbaa-schedule-${row.id}.webp"`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}).send(data);
 }catch(error){next(error);}});
 router.post('/',authorize('ADMIN'),uploadLimit,uploadMiddleware,async(req,res,next)=>{
@@ -64,24 +62,24 @@ router.post('/',authorize('ADMIN'),uploadLimit,uploadMiddleware,async(req,res,ne
     const [[term]]=await pool.execute('SELECT id FROM academic_terms WHERE id=?',[termId]);if(!term)return fail(res,'Term not found.',404);
     if(audience==='SECTION'){const [[section]]=await pool.execute('SELECT id FROM sections WHERE id=?',[sectionId]);if(!section)return fail(res,'Section not found.',404);}
     if(audience==='OFFERING'){const [[offering]]=await pool.execute("SELECT id FROM subject_offerings WHERE id=? AND term_id=? AND status='ACTIVE'",[offeringId,termId]);if(!offering)return fail(res,'Offering not found in this term.',404);}
-    const image=await encodeImage(req.file);key=randomBytes(32).toString('hex');await mkdir(storageDir,{recursive:true,mode:0o700});await writeFile(path.join(storageDir,`${key}.webp`),image.data,{flag:'wx',mode:0o600});
+    const image=await encodeImage(req.file);key=randomBytes(32).toString('hex');await putPrivateObject(objectName(key),image.data,'image/webp');
     connection=await pool.getConnection();await connection.beginTransaction();
     const [result]=await connection.execute('INSERT INTO schedule_attachments(title,description,term_id,section_id,offering_id,audience,storage_key,mime_type,width,height,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[title.trim(),description.trim(),termId,audience==='SECTION'?sectionId:null,audience==='OFFERING'?offeringId:null,audience,key,'image/webp',image.width,image.height,req.user.sub]);
     await connection.execute("INSERT INTO audit_logs(user_id,action,entity_type,entity_id) VALUES (?,'SCHEDULE_IMAGE_CREATED','schedule_attachments',?)",[req.user.sub,result.insertId]);
     await connection.commit();
     return ok(res,{id:result.insertId},'Schedule image saved as a draft.',201);
-  }catch(error){if(connection)try{await connection.rollback();}catch{}if(key)try{await unlink(path.join(storageDir,`${key}.webp`));}catch{}if(error.message?.startsWith('Invalid image')||error.message?.startsWith('Choose a'))return fail(res,error.message,422);next(error);}finally{connection?.release();}
+  }catch(error){if(connection)try{await connection.rollback();}catch{}if(key)try{await deletePrivateObject(objectName(key));}catch{}if(error.message?.startsWith('Invalid image')||error.message?.startsWith('Choose a'))return fail(res,error.message,422);next(error);}finally{connection?.release();}
 });
 router.put('/:id/image',authorize('ADMIN'),uploadLimit,uploadMiddleware,async(req,res,next)=>{
   const attachmentId=id(req.params.id);if(!attachmentId)return fail(res,'Invalid attachment.',422);
   let newKey,oldKey;const connection=await pool.getConnection();try{
-    const image=await encodeImage(req.file);newKey=randomBytes(32).toString('hex');await mkdir(storageDir,{recursive:true,mode:0o700});await writeFile(path.join(storageDir,`${newKey}.webp`),image.data,{flag:'wx',mode:0o600});
-    await connection.beginTransaction();const [[old]]=await connection.execute("SELECT storage_key,status FROM schedule_attachments WHERE id=? FOR UPDATE",[attachmentId]);if(!old||old.status==='ARCHIVED'){await connection.rollback();await unlink(path.join(storageDir,`${newKey}.webp`));return fail(res,'Attachment not found.',404);}oldKey=old.storage_key;
+    const image=await encodeImage(req.file);newKey=randomBytes(32).toString('hex');await putPrivateObject(objectName(newKey),image.data,'image/webp');
+    await connection.beginTransaction();const [[old]]=await connection.execute("SELECT storage_key,status FROM schedule_attachments WHERE id=? FOR UPDATE",[attachmentId]);if(!old||old.status==='ARCHIVED'){await connection.rollback();await deletePrivateObject(objectName(newKey));return fail(res,'Attachment not found.',404);}oldKey=old.storage_key;
     await connection.execute('UPDATE schedule_attachments SET storage_key=?,width=?,height=?,version=version+1,status=\'DRAFT\' WHERE id=?',[newKey,image.width,image.height,attachmentId]);
     await connection.execute("INSERT INTO audit_logs(user_id,action,entity_type,entity_id) VALUES (?,'SCHEDULE_IMAGE_REPLACED','schedule_attachments',?)",[req.user.sub,attachmentId]);await connection.commit();
-    try{await unlink(path.join(storageDir,`${oldKey}.webp`));}catch(error){console.error('Old attachment cleanup failed:',error.code||'FILE_ERROR');}
+    try{await deletePrivateObject(objectName(oldKey));}catch(error){console.error('Old attachment cleanup failed:',error.code||'FILE_ERROR');}
     return ok(res,null,'Replacement saved as a draft. Publish when reviewed.');
-  }catch(error){try{await connection.rollback();}catch{}if(newKey)try{await unlink(path.join(storageDir,`${newKey}.webp`));}catch{}if(error.message?.startsWith('Invalid image')||error.message?.startsWith('Choose a'))return fail(res,error.message,422);next(error);}finally{connection.release();}
+  }catch(error){try{await connection.rollback();}catch{}if(newKey)try{await deletePrivateObject(objectName(newKey));}catch{}if(error.message?.startsWith('Invalid image')||error.message?.startsWith('Choose a'))return fail(res,error.message,422);next(error);}finally{connection.release();}
 });
 router.patch('/:id/status',authorize('ADMIN'),async(req,res,next)=>{const connection=await pool.getConnection();try{
   const attachmentId=id(req.params.id),status=req.body?.status;if(!attachmentId||!['PUBLISHED','ARCHIVED'].includes(status))return fail(res,'Invalid attachment status.',422);

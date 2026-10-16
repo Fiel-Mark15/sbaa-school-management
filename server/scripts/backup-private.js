@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { env } from '../config/env.js';
 import { pool } from '../database/pool.js';
 
+if (env.privateStorageMode === 'supabase') throw new Error('backup:private covers local uploads only. Export private Supabase objects with the MySQL backup before production use.');
+
 const destination = process.argv[2];
 if (!destination || !path.isAbsolute(destination)) {
   throw new Error('Pass an absolute private backup directory outside the repository.');
