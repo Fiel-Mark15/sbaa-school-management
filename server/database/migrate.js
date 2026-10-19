@@ -2,10 +2,13 @@ import { readFile } from 'node:fs/promises';
 import mysql from 'mysql2/promise';
 import { assertEnvironment, env } from '../config/env.js';
 import { handbookAbout } from './about-handbook.js';
+import { assertDatabaseWriteTarget, assertWriteConfiguration } from './write-guard.js';
 
 assertEnvironment();
+assertWriteConfiguration();
 const connection = await mysql.createConnection({ ...env.db, multipleStatements: true });
 try {
+  await assertDatabaseWriteTarget(connection);
   const [columns] = await connection.query("SHOW COLUMNS FROM users LIKE 'status'");
   if (!columns[0]?.Type.includes('ARCHIVED')) {
     await connection.query("ALTER TABLE users MODIFY status ENUM('ACTIVE','DISABLED','PENDING','ARCHIVED') NOT NULL DEFAULT 'ACTIVE'");

@@ -2,12 +2,15 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import mysql from 'mysql2/promise';
 import { env } from '../config/env.js';
+import { assertDatabaseWriteTarget, assertWriteConfiguration } from './write-guard.js';
 
 if (process.env.NODE_ENV === 'production') throw new Error('Development seed is forbidden in production.');
 if (!process.env.DEV_SEED_PASSWORD || process.env.DEV_SEED_PASSWORD.length < 12) throw new Error('Set a private DEV_SEED_PASSWORD of at least 12 characters before running the development seed.');
+assertWriteConfiguration();
 const connection = await mysql.createConnection({ ...env.db, multipleStatements: true });
-const passwordHash = await bcrypt.hash(process.env.DEV_SEED_PASSWORD, 12);
 try {
+  await assertDatabaseWriteTarget(connection);
+  const passwordHash = await bcrypt.hash(process.env.DEV_SEED_PASSWORD, 12);
   await connection.query(`INSERT INTO users (external_id,email,password_hash,role,first_name,last_name,status) VALUES
     ('ADMIN-001','admin@schoolportal.test',?,'ADMIN','Portal','Administrator','ACTIVE'),
     ('FAC-001','faculty@schoolportal.test',?,'FACULTY','Maria','Santos','ACTIVE'),

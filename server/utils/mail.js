@@ -58,7 +58,7 @@ async function sendViaResend({address,subject,text,html,logo}) {
 async function send({address,subject,text,html,devLine}){
   if(env.mailMode==='development'){
     if(process.env.NODE_ENV==='production')throw new Error('Development mail cannot run in production.');
-    await appendFile(new URL('../dev-mail.log',import.meta.url),`${devLine}\n`,{mode:0o600});
+    await appendFile(process.env.DEV_MAIL_LOG_PATH || new URL('../dev-mail.log',import.meta.url),`${devLine}\n`,{mode:0o600});
     return {messageId:'development-log'};
   }
   if(!mailAvailable())throw new Error('Mail is not configured.');

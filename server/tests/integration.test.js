@@ -85,7 +85,7 @@ if(process.env.MAIL_MODE==='development'){
   assert.equal(diagnostics.status,200);assert.equal(diagnostics.body.data.account.status,'ACTIVE');
   assert.ok(diagnostics.body.data.events.some(event=>event.outcome==='DEVELOPMENT_LOG'),'development logging must be distinguishable from SMTP acceptance');
   assert.equal((await request('/admin/mail-diagnostics',{token:original})).status,403,'mail diagnostics must be admin-only');
-  const mail=await readFile(new URL('../dev-mail.log',import.meta.url),'utf8');
+  const mail=await readFile(process.env.DEV_MAIL_LOG_PATH || new URL('../dev-mail.log',import.meta.url),'utf8');
   const line=mail.split('\n').findLast(row=>row.includes(email));
   assert.ok(line,'development mail should contain the reset link');
   const resetToken=new URL(line.match(/https?:\/\/\S+/)?.[0]).searchParams.get('token');
@@ -94,7 +94,7 @@ if(process.env.MAIL_MODE==='development'){
   await pool.execute('UPDATE password_reset_tokens SET expires_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 SECOND) WHERE token_digest=?',[digest(resetToken)]);
   assert.equal((await request(`/auth/reset-password/validate?token=${encodeURIComponent(resetToken)}`)).status,400,'expired link must fail validation');
   assert.equal((await request('/auth/forgot-password',{method:'POST',body:{email}})).status,200);
-  const newerMail=await readFile(new URL('../dev-mail.log',import.meta.url),'utf8');
+  const newerMail=await readFile(process.env.DEV_MAIL_LOG_PATH || new URL('../dev-mail.log',import.meta.url),'utf8');
   const newerLine=newerMail.split('\n').findLast(row=>row.includes(`Password reset for ${email}:`));
   const currentToken=new URL(newerLine.match(/https?:\/\/\S+/)?.[0]).searchParams.get('token');
   assert.ok(currentToken&&currentToken!==resetToken);
@@ -116,6 +116,7 @@ if(process.env.MAIL_MODE==='development'){
     await cleanupAccount.execute("DELETE FROM notifications WHERE resource_type='profile' AND resource_id=?",[account.id]);
     await cleanupAccount.execute('DELETE FROM notification_recipients WHERE user_id=?',[account.id]);
     await cleanupAccount.execute('DELETE FROM password_reset_tokens WHERE user_id=?',[account.id]);
+    await cleanupAccount.execute('DELETE FROM email_verification_tokens WHERE user_id=?',[account.id]);
     await cleanupAccount.execute('DELETE FROM mail_delivery_events WHERE user_id=?',[account.id]);
     await cleanupAccount.execute('DELETE FROM email_change_tokens WHERE user_id=?',[account.id]);
     await cleanupAccount.execute('DELETE FROM auth_sessions WHERE user_id=?',[account.id]);

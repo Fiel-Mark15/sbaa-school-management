@@ -1,0 +1,17 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: synthetic-local-root-only
+      MYSQL_DATABASE: sbaa_pilot_test
+      MYSQL_USER: sbaa_pilot_runner
+      MYSQL_PASSWORD: synthetic-local-runner-only
+    ports:
+      - "127.0.0.1:13384:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping --host=127.0.0.1 --user=sbaa_pilot_runner --password=synthetic-local-runner-only --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
