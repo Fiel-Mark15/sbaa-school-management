@@ -193,3 +193,40 @@ button::before,button::after,.file-upload-label::before,.file-upload-label::afte
 @media(max-width:900px){.about-value-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.about-hero{flex-direction:column-reverse;align-items:flex-start}.about-hero-seal{justify-items:start}.about-hero-seal img{width:90px}.about-card-grid,.about-value-grid{grid-template-columns:1fr}.register-wrap .success-message a{margin-left:0;width:100%}}
 @media(prefers-reduced-motion:no-preference){.about-page .panel{animation:about-rise .3s ease both}@keyframes about-rise{from{opacity:.75;transform:translateY(7px)}to{opacity:1;transform:none}}}
+
+/* Keep the shared portal usable on narrow screens without changing its layout or navigation. */
+.content-page{grid-template-columns:minmax(0,1fr)}
+.profile-identity>div:first-of-type{min-width:0;overflow-wrap:anywhere}
+.profile-identity>.inline-actions{flex:0 1 auto;justify-content:flex-end;min-width:0}
+.profile-identity>.inline-actions .primary{width:auto;margin:0}
+.profile-identity .role-badge,.profile-identity .status-badge{max-width:100%;white-space:normal;overflow-wrap:anywhere;vertical-align:middle}
+.profile-identity p{min-width:0;overflow-wrap:anywhere}
+.item-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
+.attachment-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr))}
+.pagination{flex-wrap:wrap}
+.session-row>div{min-width:0}.session-row small{overflow-wrap:anywhere}
+.portal-header{min-width:0}.portal-header h1{min-width:0;overflow-wrap:anywhere}
+.menu{background:var(--accent-soft);color:var(--text);min-width:44px;min-height:44px;place-items:center}
+.menu:hover,.header-bell:hover{background:var(--accent-soft);color:var(--text)}
+.portal aside nav a.router-link-active:not([aria-current="page"]){background:transparent;color:var(--text)}
+@media(max-width:900px){
+  .portal aside,.portal aside.open{width:min(260px,calc(100vw - 3rem));min-height:100dvh;max-height:100dvh;background:var(--surface);color:var(--text);border-color:var(--border)}
+  .portal aside nav a,.portal aside .logout,.portal aside .school-mark{color:var(--text)}
+  .portal aside .school-mark small{color:var(--muted)}
+  .portal aside nav a:hover,.portal aside nav a[aria-current="page"],.portal aside nav a.router-link-active,.portal aside .logout:hover{background:var(--accent-soft);color:var(--text)}
+  .portal aside .account-nav{border-color:var(--border)}
+}
+@media(max-width:600px){
+  .profile-identity{grid-template-columns:68px minmax(0,1fr);padding:1rem;gap:.75rem}
+  .profile-identity>.inline-actions{grid-column:1/-1;width:100%;justify-content:flex-start;margin:0}
+  .profile-identity>.inline-actions button{flex:1 1 10rem;min-width:0;min-height:44px;white-space:normal}
+  .record-row{flex-wrap:wrap}
+  .record-row>.inline-actions{width:100%;justify-content:flex-start}
+  .session-row{flex-wrap:wrap}
+  .session-row .text-button{margin-left:auto}
+}
+@media(max-width:430px){
+  .profile-identity>.inline-actions{flex-direction:column;align-items:stretch}
+  .profile-identity>.inline-actions button{flex:0 0 auto;width:100%;margin:0}
+  .profile-tabs{width:100%}
+}

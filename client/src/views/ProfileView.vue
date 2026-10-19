@@ -91,4 +91,4 @@ async function checkMail(){mailChecking.value=true;error.value='';try{mailDiagno
     </template>
   </div></PortalLayout>
 </template>
-<style scoped>.sessions-dialog{width:min(42rem,calc(100vw - 2rem));max-height:min(80vh,48rem);overflow:auto;border:1px solid var(--line);border-radius:1rem;background:var(--surface);color:var(--text);padding:1.5rem;box-shadow:0 1rem 3rem #0004}.sessions-dialog::backdrop{background:#061b14a8}@media(max-width:600px){.sessions-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0}}</style>
+<style scoped>.sessions-dialog{width:min(42rem,calc(100vw - 2rem));max-height:min(80vh,48rem);overflow:auto;border:1px solid var(--border);border-radius:1rem;background:var(--surface);color:var(--text);padding:1.5rem;box-shadow:0 1rem 3rem #0004}.sessions-dialog::backdrop{background:#061b14a8}@media(max-width:600px){.sessions-dialog{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;margin:0;border-radius:0;padding:1rem}}</style>
