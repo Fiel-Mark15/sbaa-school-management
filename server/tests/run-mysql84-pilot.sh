@@ -49,4 +49,5 @@ for _ in {1..30}; do
 done
 curl --silent --fail http://127.0.0.1:15050/api/health >/dev/null
 npm run test:integration --prefix server
+npm run test:extended --prefix server
 echo 'Disposable MySQL 8.4 pilot test passed. Container and API will be stopped.'

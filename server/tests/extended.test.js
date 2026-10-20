@@ -52,8 +52,15 @@ try{
   const gradeValue=Number(effective.minimum);
   assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:student,body:{value:gradeValue,status:'PUBLISHED'}})).status,403,'student may not assign a grade');
   assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:faculty,body:{value:gradeValue,status:'DRAFT'}})).status,200);
+  const draft=(await request(`/grades?offeringId=${assigned.id}`,{token:admin})).data.data.find(row=>row.enrollmentId===enrollmentId);
+  assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:admin,body:{value:gradeValue}})).status,409,'existing drafts require a version to prevent silent overwrites');
+  assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:admin,body:{value:gradeValue,version:draft.version}})).status,200,'admin may edit a draft through the same workflow');
+  assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:faculty,body:{value:gradeValue,version:draft.version}})).status,409,'stale edits must not overwrite another encoder');
+  const [[gradeCount]]=await pool.execute('SELECT COUNT(*) count FROM grade_records WHERE enrollment_id=?',[enrollmentId]);
+  assert.equal(gradeCount.count,1,'editing must not create a duplicate grade record');
   assert.ok(!(await request('/grades',{token:student})).data.data.some(row=>row.code===assigned.code),'draft grade must stay private');
   assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:faculty,body:{value:gradeValue,status:'PUBLISHED'}})).status,422,'legacy status input cannot publish directly');
+  assert.equal((await request(`/grades/${enrollmentId}/submit`,{method:'POST',token:student})).status,403,'student cannot submit a grade');
   const submit=await request(`/grades/${enrollmentId}/submit`,{method:'POST',token:faculty});
   if(effective.passingValue==null){assert.equal(submit.status,409,'no grade can be submitted without an approved passing rule');}
   else{
@@ -70,11 +77,17 @@ try{
     assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:faculty,body:{value:gradeValue,status:'DRAFT'}})).status,409,'faculty cannot silently edit published grade');
     assert.equal((await request(`/grades/${enrollmentId}/reopen`,{method:'POST',token:admin,body:{reason:'Verified test correction'}})).status,200);
     assert.ok(!(await request('/grades',{token:student})).data.data.some(row=>row.code===assigned.code),'reopened grade must be hidden until republished');
+    const reopened=(await request(`/grades?offeringId=${assigned.id}`,{token:admin})).data.data.find(row=>row.enrollmentId===enrollmentId);
+    assert.equal((await request(`/grades/${enrollmentId}`,{method:'PUT',token:admin,body:{value:gradeValue,version:reopened.version}})).status,200,'admin may save a reopened draft');
+    assert.equal((await request(`/grades/${enrollmentId}/submit`,{method:'POST',token:admin})).status,200,'admin may submit a draft for review');
+    assert.ok(!(await request('/grades',{token:student})).data.data.some(row=>row.code===assigned.code),'admin-submitted grade must stay private');
+    assert.equal((await request(`/grades/${enrollmentId}/decision`,{method:'POST',token:admin,body:{decision:'APPROVE'}})).status,200,'admin review publishes the submitted grade');
+    assert.ok((await request('/grades',{token:student})).data.data.some(row=>row.code===assigned.code),'only published grades appear to students');
   }
   if(process.env.MAIL_MODE==='development'){
     assert.equal((await request('/account/email-change',{method:'POST',token:student,body:{newEmail,currentPassword:newPassword}})).status,200);
     assert.equal((await request('/auth/me',{token:student})).status,200,'old email/session must work while verification is pending');
-    const mail=await readFile(new URL('../dev-mail.log',import.meta.url),'utf8');
+    const mail=await readFile(process.env.DEV_MAIL_LOG_PATH || new URL('../dev-mail.log',import.meta.url),'utf8');
     const line=mail.split('\n').findLast(row=>row.includes(`Email change verification for ${newEmail}:`));assert.ok(line);
     const token=new URL(line.match(/https?:\/\/\S+/)?.[0]).searchParams.get('token');assert.ok(token);
     assert.equal((await request(`/auth/email-change/validate?token=${encodeURIComponent(token)}`)).status,200);
@@ -99,6 +112,7 @@ try{
       await connection.execute('DELETE FROM audit_logs WHERE entity_type=\'enrollments\' AND entity_id=?',[enrollmentId||0]);
       await connection.execute('DELETE FROM enrollments WHERE id=?',[enrollmentId||0]);
       await connection.execute('DELETE FROM email_change_tokens WHERE user_id=?',[userId]);
+      await connection.execute('DELETE FROM email_verification_tokens WHERE user_id=?',[userId]);
       await connection.execute('DELETE FROM password_reset_tokens WHERE user_id=?',[userId]);
       await connection.execute('DELETE FROM mail_delivery_events WHERE user_id=?',[userId]);
       await connection.execute('DELETE FROM auth_sessions WHERE user_id=?',[userId]);

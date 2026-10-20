@@ -53,7 +53,7 @@ router.get('/export.csv',async(req,res,next)=>{try{
   const lines=[fields.map(safe).join(','),...rows.map(row=>[row.academicYear,row.semester,row.subjectCode,row.subjectTitle,row.section,row.teacher,row.studentId,row.studentName,row.value,row.remark,row.status,row.policyVersionId].map(safe).join(','))];
   res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="sbaa-grade-report.csv"');res.setHeader('Cache-Control','private, no-store');return res.send(`\uFEFF${lines.join('\r\n')}\r\n`);
 }catch(error){next(error);}});
-router.put('/:enrollmentId',authorize('FACULTY'),async(req,res,next)=>{
+router.put('/:enrollmentId',authorize('ADMIN','FACULTY'),async(req,res,next)=>{
   const enrollmentId=id(req.params.enrollmentId),value=Number(req.body?.value),expectedVersion=req.body?.version;
   if(!enrollmentId||req.body?.value===''||req.body?.value==null||!Number.isFinite(value)||Number(value.toFixed(2))!==value||(req.body?.status!=null&&req.body.status!=='DRAFT')||(expectedVersion!=null&&!id(expectedVersion)))return fail(res,'Enter a draft grade with at most two decimal places.',422);
   const connection=await pool.getConnection();try{await connection.beginTransaction();
@@ -64,23 +64,24 @@ router.put('/:enrollmentId',authorize('FACULTY'),async(req,res,next)=>{
       FROM enrollments e JOIN subject_offerings o ON o.id=e.offering_id LEFT JOIN faculty f ON f.id=o.faculty_id
       LEFT JOIN grade_records g ON g.enrollment_id=e.id WHERE e.id=? FOR UPDATE`,[enrollmentId]);
     if(!record||record.enrollmentStatus!=='ENROLLED'){await connection.rollback();return fail(res,'Active enrollment not found.',404);}
-    if(record.facultyUserId!==req.user.sub){await connection.rollback();return fail(res,'This class is not assigned to you.',403);}
+    if(req.user.role==='FACULTY'&&record.facultyUserId!==req.user.sub){await connection.rollback();return fail(res,'This class is not assigned to you.',403);}
     if(record.oldStatus&&record.oldStatus!=='DRAFT'){await connection.rollback();return fail(res,'Only draft grades can be edited. Ask an administrator to return or reopen this grade.',409);}
-    if(expectedVersion!=null&&Number(expectedVersion)!==Number(record.version)){await connection.rollback();return fail(res,'This grade changed elsewhere. Reload before saving.',409);}
+    if(record.gradeId&&(expectedVersion==null||Number(expectedVersion)!==Number(record.version))){await connection.rollback();return fail(res,'This grade changed elsewhere. Reload before saving.',409);}
+    if(!record.gradeId&&expectedVersion!=null){await connection.rollback();return fail(res,'This grade changed elsewhere. Reload before saving.',409);}
     if(record.gradeId)await connection.execute('UPDATE grade_records SET value=?,graded_by=?,policy_version_id=?,version=version+1 WHERE id=?',[value,req.user.sub,policy.versionId,record.gradeId]);
     else await connection.execute("INSERT INTO grade_records(enrollment_id,value,status,graded_by,policy_version_id) VALUES (?,?,'DRAFT',?,?)",[enrollmentId,value,req.user.sub,policy.versionId]);
     await connection.execute("INSERT INTO audit_logs(user_id,action,entity_type,entity_id,metadata) VALUES (?,'GRADE_DRAFT_SAVED','enrollments',?,?)",[req.user.sub,enrollmentId,JSON.stringify({oldValue:record.oldValue??null,newValue:value,policyVersionId:policy.versionId})]);
     await connection.commit();return ok(res,null,'Grade draft saved.');
   }catch(error){await connection.rollback();next(error);}finally{connection.release();}
 });
-router.post('/:enrollmentId/submit',authorize('FACULTY'),async(req,res,next)=>{
+router.post('/:enrollmentId/submit',authorize('ADMIN','FACULTY'),async(req,res,next)=>{
   const enrollmentId=id(req.params.enrollmentId);if(!enrollmentId)return fail(res,'Choose a grade.',422);
   const connection=await pool.getConnection();try{await connection.beginTransaction();
     const [[record]]=await connection.execute(`SELECT g.id,g.status,g.policy_version_id policyVersionId,pv.passing_value passingValue,pv.pass_direction passDirection,f.user_id facultyUserId
       FROM grade_records g JOIN enrollments e ON e.id=g.enrollment_id JOIN subject_offerings o ON o.id=e.offering_id
-      JOIN faculty f ON f.id=o.faculty_id LEFT JOIN grading_policy_versions pv ON pv.id=g.policy_version_id WHERE e.id=? FOR UPDATE`,[enrollmentId]);
+      LEFT JOIN faculty f ON f.id=o.faculty_id LEFT JOIN grading_policy_versions pv ON pv.id=g.policy_version_id WHERE e.id=? FOR UPDATE`,[enrollmentId]);
     if(!record){await connection.rollback();return fail(res,'Save a draft grade first.',404);}
-    if(record.facultyUserId!==req.user.sub){await connection.rollback();return fail(res,'This class is not assigned to you.',403);}
+    if(req.user.role==='FACULTY'&&record.facultyUserId!==req.user.sub){await connection.rollback();return fail(res,'This class is not assigned to you.',403);}
     if(record.status!=='DRAFT'){await connection.rollback();return fail(res,'Only draft grades can be submitted.',409);}
     if(record.passingValue==null||!record.passDirection){await connection.rollback();return fail(res,'An approved passing rule is required before submission. Ask an administrator to configure the official policy.',409);}
     await connection.execute("UPDATE grade_records SET status='SUBMITTED',submitted_at=UTC_TIMESTAMP(),submitted_by=?,version=version+1 WHERE id=?",[req.user.sub,record.id]);
