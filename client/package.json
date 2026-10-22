@@ -1,6 +1,6 @@
 {
   "name": "sbaa-portal-client", "private": true, "version": "0.1.0", "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test:proxy": "node tests/pages-proxy.test.js" },
+  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test:proxy": "node tests/pages-proxy.test.js", "test:connection": "node tests/portal-connection.test.js" },
   "dependencies": { "@vitejs/plugin-vue": "^5.2.1", "axios": "^1.7.9", "lucide-vue-next": "^0.468.0", "pinia": "^2.2.6", "vue": "^3.5.13", "vue-router": "^4.5.0" },
   "devDependencies": { "vite": "^6.0.5" }
 }

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { isTemporaryConnectionFailure, waitForPortal } from './portal-connection';
 export const cookieSession = import.meta.env.PROD;
 const api = axios.create({
   baseURL: cookieSession ? '/api' : (import.meta.env.VITE_API_URL || 'http://localhost:5050/api'),
@@ -21,11 +22,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 api.interceptors.response.use((response)=>response,(error)=>{
-  if(error.response?.status===401&&!['/auth/login','/auth/me','/auth/csrf'].includes(error.config?.url)&&window.location.pathname!=='/login'){
+  const config = error.config;
+  if (config && (config.method || 'get').toLowerCase() === 'get' && config.url !== '/health'
+    && !config.wakeRetried && !config.skipWakeRetry && isTemporaryConnectionFailure(error)) {
+    config.wakeRetried = true;
+    return waitForPortal(timeout => api.get('/health', { timeout, skipWakeRetry: true }))
+      .then(() => api(config));
+  }
+  if(error.response?.status===401&&!['/health','/auth/login','/auth/me','/auth/csrf'].includes(error.config?.url)&&window.location.pathname!=='/login'){
     setCsrfToken(null);
     localStorage.removeItem('sbaa_token');
     window.location.assign('/login');
   }
   return Promise.reject(error);
 });
+export const connectToPortal = () => waitForPortal(timeout => api.get('/health', { timeout, skipWakeRetry: true }));
 export default api;

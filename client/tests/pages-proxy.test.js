@@ -26,6 +26,15 @@ try {
   assert.equal(denied.status, 403);
   const unconfigured = await onRequest({ request: new Request('https://school.pages.dev/api/health'), env: {} });
   assert.equal(unconfigured.status, 503);
+  let failures = 0;
+  globalThis.fetch = async () => { failures += 1; throw new Error('Upstream is waking'); };
+  const unavailable = await onRequest({ request: new Request('https://school.pages.dev/api/health'), env });
+  assert.equal(unavailable.status, 502);
+  assert.equal(failures, 1, 'The proxy must not replay upstream requests');
+  globalThis.fetch = async () => new Response('{"success":false}', { status: 503 });
+  const waking = await onRequest({ request: new Request('https://school.pages.dev/api/health'), env });
+  assert.equal(waking.status, 503);
+  assert.equal(waking.headers.get('Cache-Control'), 'no-store');
   console.log('Cloudflare API proxy checks passed.');
 } finally {
   globalThis.fetch = realFetch;

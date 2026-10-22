@@ -230,3 +230,4 @@ button::before,button::after,.file-upload-label::before,.file-upload-label::afte
   .profile-identity>.inline-actions button{flex:0 0 auto;width:100%;margin:0}
   .profile-tabs{width:100%}
 }
+.portal-connection-status{position:fixed;z-index:100;top:1rem;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 2rem);padding:.75rem 1rem;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:0 8px 24px #102a1d30;text-align:center;font-weight:700;overflow-wrap:anywhere}
