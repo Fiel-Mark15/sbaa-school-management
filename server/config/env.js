@@ -30,10 +30,11 @@ export function assertEnvironment() {
     if(!process.env.DB_PASSWORD) throw new Error('DB_PASSWORD is required in production.');
     if(!process.env.DB_SSL_CA?.includes('-----BEGIN CERTIFICATE-----') || !process.env.DB_SSL_CA.includes('-----END CERTIFICATE-----')) throw new Error('Production requires the Aiven DB_SSL_CA certificate.');
     if(!process.env.PROXY_SHARED_SECRET || process.env.PROXY_SHARED_SECRET.length<32) throw new Error('Production requires a random PROXY_SHARED_SECRET of at least 32 characters.');
-    if(!['smtp','resend'].includes(process.env.MAIL_MODE)) throw new Error('Production requires MAIL_MODE=smtp or resend.');
+    if(!['smtp','resend','brevo'].includes(process.env.MAIL_MODE)) throw new Error('Production requires MAIL_MODE=smtp, resend, or brevo.');
     if(process.env.MAIL_MODE==='smtp' && (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.MAIL_FROM)) throw new Error('Production SMTP settings are incomplete.');
     if(process.env.MAIL_MODE==='smtp' && process.env.SMTP_HOST.toLowerCase()==='smtp.gmail.com' && (process.env.SMTP_PORT!=='465' || process.env.SMTP_SECURE!=='true' || process.env.MAIL_FROM!==`SBAA School Portal <${process.env.SMTP_USER}>`)) throw new Error('Gmail SMTP requires port 465, secure TLS, and a matching sender address.');
     if(process.env.MAIL_MODE==='resend' && (!process.env.RESEND_API_KEY || !/^SBAA School Portal <[^<>\s@]+@[^<>\s@]+>$/.test(process.env.MAIL_FROM||''))) throw new Error('Resend requires RESEND_API_KEY and MAIL_FROM from a verified sender domain.');
+    if(process.env.MAIL_MODE==='brevo' && (!process.env.BREVO_API_KEY?.trim() || process.env.MAIL_FROM!=='SBAA System <sbaa.chcci.admin@gmail.com>')) throw new Error('Brevo requires BREVO_API_KEY and the approved MAIL_FROM sender.');
     if(storageMode==='filesystem'&&!process.env.UPLOAD_DIR?.startsWith('/')) throw new Error('UPLOAD_DIR must be an absolute persistent path in production.');
     if(process.env.RENDER === 'true' && process.env.RUN_REMINDER_SCHEDULER === 'true') throw new Error('Render Free cannot reliably host the minute-loop reminder scheduler.');
     if(process.env.RENDER === 'true' && storageMode!=='supabase') throw new Error('Render Free requires configured private Supabase storage.');
@@ -53,6 +54,7 @@ export const env = {
   csrfSecret: process.env.CSRF_SECRET || '',
   mailMode: process.env.MAIL_MODE || '',
   resendApiKey: process.env.RESEND_API_KEY || '',
+  brevoApiKey: process.env.BREVO_API_KEY || '',
   mailFrom: process.env.MAIL_FROM || '',
   smtp: { host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), secure:process.env.SMTP_SECURE==='true', user: process.env.SMTP_USER, password: process.env.SMTP_PASSWORD, from: process.env.MAIL_FROM||process.env.SMTP_FROM },
   limits:{login:Number(process.env.AUTH_LOGIN_LIMIT||20),register:Number(process.env.AUTH_REGISTER_LIMIT||20),forgot:Number(process.env.AUTH_FORGOT_LIMIT||10),reset:Number(process.env.AUTH_RESET_LIMIT||20),validate:Number(process.env.AUTH_VALIDATE_LIMIT||60)}

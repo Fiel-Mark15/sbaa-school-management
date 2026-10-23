@@ -10,7 +10,7 @@ Render Free has an ephemeral filesystem and no persistent disk. Configure `PRIVA
 
 Render Free also spins down when idle. Class reminders are in-app notices with MySQL deduplication, but the minute-loop worker cannot run reliably on a sleeping web service. Set `RUN_REMINDER_SCHEDULER=false` for the pilot and clearly disable the reminder promise in school-facing communications. To enable reminders later, use an approved always-on worker or scheduled job that invokes `server/services/reminder-worker.js` or a bounded one-shot variant, with one active scheduler and a real-occurrence/restart test. A visitor's open browser tab is not a scheduler.
 
-Render Free blocks outbound SMTP ports 25, 465, and 587. Keep local Gmail `MAIL_MODE=smtp` unchanged. For Render use `MAIL_MODE=resend`, a privately configured Resend API key, and `MAIL_FROM=SBAA School Portal <sender@verified-domain>`; the school must approve and verify the sending domain. The HTTPS adapter preserves current templates and inline seal. A provider API success means acceptance, **not** inbox delivery. Controlled recipient inbox receipt and single-use link completion remain separate launch checks. Do not use development-log mode in production.
+Render Free blocks outbound SMTP ports 25, 465, and 587. Keep local Gmail `MAIL_MODE=smtp` unchanged. For Render select exactly one HTTPS adapter: `MAIL_MODE=resend` with a privately configured Resend API key and verified sending domain, or `MAIL_MODE=brevo` with a private Brevo API key and the authorized `SBAA System <sbaa.chcci.admin@gmail.com>` sender. Brevo also requires transactional sending activation and sender authorization; a verified individual address does not guarantee inbox delivery. Resend and SMTP retain their existing inline seal; Brevo uses the public portal seal URL because its API does not provide this adapter's CID attachment behavior. A provider API success means acceptance, **not** inbox delivery. Controlled recipient inbox receipt and single-use link completion remain separate launch checks. Do not use development-log mode in production.
 
 ## Repository and private backup
 
@@ -69,9 +69,10 @@ Set the following **private Render runtime variables**. Replace angle-bracket pl
 | `SESSION_TRANSPORT` | `cookie` |
 | `CSRF_SECRET` | New cryptographically random value, at least 32 characters |
 | `PROXY_SHARED_SECRET` | Different random value, at least 32 characters; same value in Cloudflare Pages Function secret |
-| `MAIL_MODE` | `resend` for Render Free; `smtp` remains available locally or on SMTP-capable hosting |
+| `MAIL_MODE` | `brevo` or `resend` for Render Free (one only); `smtp` remains available locally or on SMTP-capable hosting |
 | `RESEND_API_KEY` | Private key from an approved account, never a `VITE_` variable |
-| `MAIL_FROM` | `SBAA School Portal <sender@verified-school-domain>`; domain/sender must be verified by the provider |
+| `BREVO_API_KEY` | Private Brevo API key with Transactional Email send permission; required only with `MAIL_MODE=brevo`, never a `VITE_` variable |
+| `MAIL_FROM` | For Brevo: `SBAA System <sbaa.chcci.admin@gmail.com>` after Brevo authorizes that sender; for Resend: `SBAA School Portal <sender@verified-school-domain>` |
 | `RUN_REMINDER_SCHEDULER` | `false` for the Free pilot |
 | `PRIVATE_STORAGE_MODE` | `supabase` on Render Free (`filesystem` for local development) |
 | `SUPABASE_URL` | Exact HTTPS Supabase project origin, e.g. `https://<project-ref>.supabase.co` |

@@ -17,6 +17,7 @@ const senderAddress=()=>env.smtp.from?.match(/^SBAA School Portal <([^<>\s@]+@[^
 export function mailAvailable(){
   if(env.mailMode==='development')return process.env.NODE_ENV!=='production';
   if(env.mailMode==='resend')return Boolean(env.resendApiKey && /^SBAA School Portal <[^<>\s@]+@[^<>\s@]+>$/.test(env.mailFrom));
+  if(env.mailMode==='brevo')return Boolean(env.brevoApiKey.trim() && env.mailFrom==='SBAA System <sbaa.chcci.admin@gmail.com>');
   if(env.mailMode!=='smtp'||!env.smtp.host||!env.smtp.from||!Number.isInteger(env.smtp.port)||env.smtp.port<1||env.smtp.port>65535)return false;
   if(env.smtp.port===465?!env.smtp.secure:env.smtp.secure)return false;
   if(env.smtp.host.toLowerCase()==='smtp.gmail.com')return Boolean(env.smtp.user&&env.smtp.password&&senderAddress()===env.smtp.user.toLowerCase());
@@ -26,7 +27,7 @@ export function safeMailErrorCode(error){const code=error?.code;return typeof co
 // A transport error after DATA may occur after provider acceptance. Never assume
 // that a missing acknowledgement means the emailed link was not delivered.
 export function mailFailureOutcome(error){
-  return ['EDNS','EAI_AGAIN','EAUTH','EENVELOPE','HTTP_400','HTTP_401','HTTP_403','HTTP_422'].includes(error?.code)?'PROVIDER_REJECTED':'PROVIDER_UNKNOWN';
+  return ['EDNS','EAI_AGAIN','EAUTH','EENVELOPE','HTTP_400','HTTP_401','HTTP_402','HTTP_403','HTTP_406','HTTP_422','HTTP_429'].includes(error?.code)?'PROVIDER_REJECTED':'PROVIDER_UNKNOWN';
 }
 export async function checkMailService(){if(!mailAvailable())throw new Error('Mail is not configured.');if(env.mailMode==='smtp')await retryTemporaryDns(()=>transport().verify());}
 async function sendViaResend({address,subject,text,html,logo}) {
@@ -55,6 +56,31 @@ async function sendViaResend({address,subject,text,html,logo}) {
   }
   return { messageId: data.id };
 }
+async function sendViaBrevo({address,subject,text,html}) {
+  // Never retry an ambiguous response: Brevo may have accepted the first request.
+  let response;
+  try {
+    response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST', signal: AbortSignal.timeout(20000),
+      headers: { 'api-key': env.brevoApiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ sender: { name: 'SBAA System', email: 'sbaa.chcci.admin@gmail.com' },
+        to: [{ email: address }], subject, htmlContent: html, textContent: text })
+    });
+  } catch {
+    const error = new Error('Mail provider response was not confirmed.'); error.code = 'HTTP_UNKNOWN'; throw error;
+  }
+  if (!response.ok) {
+    const error = new Error('Mail provider rejected the request.'); error.code = `HTTP_${response.status}`; throw error;
+  }
+  let data;
+  try { data = await response.json(); } catch {
+    const error = new Error('Mail provider response was not confirmed.'); error.code = 'HTTP_UNKNOWN'; throw error;
+  }
+  if (typeof data?.messageId !== 'string' || !data.messageId) {
+    const error = new Error('Mail provider response was not confirmed.'); error.code = 'HTTP_UNKNOWN'; throw error;
+  }
+  return { messageId: data.messageId, statusCode: response.status };
+}
 async function send({address,subject,text,html,devLine}){
   if(env.mailMode==='development'){
     if(process.env.NODE_ENV==='production')throw new Error('Development mail cannot run in production.');
@@ -62,6 +88,7 @@ async function send({address,subject,text,html,devLine}){
     return {messageId:'development-log'};
   }
   if(!mailAvailable())throw new Error('Mail is not configured.');
+  if(env.mailMode==='brevo')return sendViaBrevo({address,subject,text,html});
   const logo=await readFile(new URL('../../public/assets/sbaa-logo.png',import.meta.url));
   if(env.mailMode==='resend')return sendViaResend({address,subject,text,html,logo});
   const result=await retryTemporaryDns(()=>transport().sendMail({from:env.smtp.from,to:address,subject,text,html,attachments:html?[{filename:'sbaa-logo.png',content:logo,cid:'sbaa-school-portal-logo',contentDisposition:'inline'}]:[]}));
@@ -71,7 +98,8 @@ async function send({address,subject,text,html,devLine}){
 function emailLayout(heading,body,buttonLabel,link){
   const action=buttonLabel&&link?`<p style="margin:22px 0;text-align:center"><a href="${escapeHtml(link)}" style="display:inline-block;background:#075e49;color:#ffffff;padding:14px 24px;border-radius:7px;text-decoration:none;font-size:15px;font-weight:bold">${escapeHtml(buttonLabel)}</a></p>`:'';
   const fallback=link?`<p style="font-size:12px;line-height:1.5;overflow-wrap:anywhere;word-break:break-word;margin:20px 0 0">If the button does not work, copy this link:<br><a href="${escapeHtml(link)}" style="color:#075e49">${escapeHtml(link)}</a></p>`:'';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f3f8f5;font-family:Arial,Helvetica,sans-serif;color:#163c31"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;background:#f3f8f5"><tr><td align="center" style="padding:20px 12px"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;max-width:600px;background:#ffffff;border:1px solid #dcece4"><tr><td style="background:#075e49;padding:18px 24px;color:#ffffff;font-size:17px;font-weight:bold;line-height:38px"><img src="cid:sbaa-school-portal-logo" alt="SBAA School of Business Administration and Accountancy seal" width="38" height="38" style="display:inline-block;vertical-align:middle;margin-right:10px;background:#ffffff;border-radius:50%;object-fit:contain">SBAA School Portal</td></tr><tr><td style="padding:24px 28px 12px;font-size:14px;line-height:1.55"><h1 style="font-size:22px;line-height:1.25;margin:0 0 16px;color:#163c31">${escapeHtml(heading)}</h1>${body}${action}${fallback}</td></tr><tr><td style="padding:16px 28px 22px;border-top:1px solid #dcece4;color:#597367;font-size:12px;line-height:1.5">SBAA School Portal<br>School of Business Administration and Accountancy</td></tr></table></td></tr></table></body></html>`;
+  const logoSource=env.mailMode==='brevo'?`${env.appPublicUrl}/assets/sbaa-logo.png`:'cid:sbaa-school-portal-logo';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f3f8f5;font-family:Arial,Helvetica,sans-serif;color:#163c31"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;background:#f3f8f5"><tr><td align="center" style="padding:20px 12px"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;max-width:600px;background:#ffffff;border:1px solid #dcece4"><tr><td style="background:#075e49;padding:18px 24px;color:#ffffff;font-size:17px;font-weight:bold;line-height:38px"><img src="${escapeHtml(logoSource)}" alt="SBAA School of Business Administration and Accountancy seal" width="38" height="38" style="display:inline-block;vertical-align:middle;margin-right:10px;background:#ffffff;border-radius:50%;object-fit:contain">SBAA School Portal</td></tr><tr><td style="padding:24px 28px 12px;font-size:14px;line-height:1.55"><h1 style="font-size:22px;line-height:1.25;margin:0 0 16px;color:#163c31">${escapeHtml(heading)}</h1>${body}${action}${fallback}</td></tr><tr><td style="padding:16px 28px 22px;border-top:1px solid #dcece4;color:#597367;font-size:12px;line-height:1.5">SBAA School Portal<br>School of Business Administration and Accountancy</td></tr></table></td></tr></table></body></html>`;
 }
 export async function sendResetMail(address,link,firstName='there'){
   const body=`<p>Hi ${escapeHtml(firstName)},</p><p>We received a request to reset your SBAA School Portal password. Use the button below to choose a new password.</p><p>This link expires in 30 minutes and can be used once. Your password will stay the same until you complete the reset.</p><p>If you did not request this, you can ignore this email. For help, contact your school's verified support channel.</p>`;
@@ -97,4 +125,11 @@ export async function sendCurrentEmailVerificationMail(address,link,firstName='t
 export async function sendEmailChangedNotice(address,firstName='there'){
   const text=`Hi ${firstName},\n\nThe email address on your SBAA School Portal account was changed. If you did not do this, contact your school's verified support channel immediately.`;
   return send({address,subject:'Your SBAA School Portal email changed',text,html:emailLayout('Email changed',`<p>Hi ${escapeHtml(firstName)},</p><p>The email address on your account was changed. If this was not you, contact your school's verified support channel immediately.</p>`),devLine:`Email changed notice for ${address}`});
+}
+// Operator-only diagnostic: no account lookup, database write, token, or link.
+export async function sendBrevoDiagnosticMail(address){
+  if(env.mailMode!=='brevo')throw new Error('Brevo diagnostic requires MAIL_MODE=brevo.');
+  const text='This is a one-time SBAA School Portal email delivery test. No action is required.';
+  return send({address,subject:'SBAA School Portal email delivery test',text,
+    html:'<!doctype html><html lang="en"><body><p>This is a one-time SBAA School Portal email delivery test. No action is required.</p></body></html>'});
 }
